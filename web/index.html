@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Recommendation</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Best payment method</h1>
+      <form id="recommendation-form">
+        <label>
+          Merchant
+          <select id="merchant" required>
+            <option value="FamilyMart">FamilyMart</option>
+            <option value="7-ELEVEN">7-ELEVEN</option>
+            <option value="Starbucks">Starbucks</option>
+          </select>
+        </label>
+
+        <label>
+          Amount (TWD)
+          <input id="amount" type="number" min="1" value="500" required />
+        </label>
+
+        <label>
+          Purchase date
+          <input id="date" type="date" required />
+        </label>
+
+        <button type="submit">Recommend</button>
+      </form>
+
+      <section id="results" aria-live="polite"></section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
