@@ -2,19 +2,24 @@
 
 Store-focused payment recommendation app prototype.
 
-This workspace contains:
-- `api/` — backend recommendation logic and TypeScript route contract
-- `web/` — browser-based prototype UI that works without Node tooling
+This repo contains a merchant-based MVP that recommends the best payment method for a store, amount, and date.
 
-This implementation is intentionally targeted at the merchant-based MVP described in the design: merchant + amount + date, not category-based logic.
+## Structure
+- `api/` — backend recommendation logic and TypeScript service
+- `web/` — browser UI demo
 
-Important: the runtime environment here does not include Node/npm, so dependency installation and full test execution could not be completed inside this session. The project scaffold and validation logic were written in a writable fallback workspace (`/tmp/payment-recommender`) to keep the implementation moving.
-
-When Node is available, run:
+## Local run
 
 ```bash
+export PATH="/tmp/node-v20.17.0-linux-x64/bin:$PATH"
 npm install --workspaces
-npm run web:dev
+npx ts-node api/src/server.ts
 ```
 
-or open `web/index.html` directly in a browser.
+Then open:
+
+```bash
+python3 -m http.server 4173 --directory web
+```
+
+The UI calls `http://localhost:4000/api/recommendations` when the API is running.

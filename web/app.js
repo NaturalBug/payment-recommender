@@ -1,47 +1,41 @@
-const rewards = [
-  { merchantName: 'FamilyMart', paymentMethod: 'LINE Pay', cashbackRate: 0.03, amountThreshold: 0, validityStart: '2026-01-01', validityEnd: '2026-12-31', promotionNote: '3% cashback at FamilyMart' },
-  { merchantName: 'FamilyMart', paymentMethod: 'VISA', cashbackRate: 0.02, amountThreshold: 0, validityStart: '2026-01-01', validityEnd: '2026-12-31', promotionNote: '2% cashback at FamilyMart' },
-  { merchantName: '7-ELEVEN', paymentMethod: 'LINE Pay', cashbackRate: 0.025, amountThreshold: 0, validityStart: '2026-01-01', validityEnd: '2026-12-31', promotionNote: '2.5% at 7-ELEVEN' },
-  { merchantName: 'Starbucks', paymentMethod: 'AMEX Gold', cashbackRate: 0.04, amountThreshold: 100, validityStart: '2026-08-01', validityEnd: '2026-08-31', promotionNote: '4% August coffee promotion' },
-  { merchantName: 'Starbucks', paymentMethod: 'VISA', cashbackRate: 0.015, amountThreshold: 0, validityStart: '2026-01-01', validityEnd: '2026-12-31', promotionNote: '1.5% standard cashback' }
-];
-
 const form = document.getElementById('recommendation-form');
 const results = document.getElementById('results');
 const dateInput = document.getElementById('date');
+const merchantSelect = document.getElementById('merchant');
 
 dateInput.value = new Date().toISOString().slice(0, 10);
 
-function recommend({ merchantName, amount, date }) {
-  const purchaseDate = new Date(date);
+async function fetchRecommendations(payload) {
+  try {
+    const params = new URLSearchParams({
+      merchant_name: payload.merchantName,
+      amount: String(payload.amount),
+      date: payload.date
+    });
 
-  return rewards
-    .filter((rule) => {
-      const start = new Date(rule.validityStart);
-      const end = new Date(rule.validityEnd);
-      return (
-        rule.merchantName.toLowerCase() === merchantName.toLowerCase() &&
-        purchaseDate >= start &&
-        purchaseDate <= end &&
-        amount >= rule.amountThreshold
-      );
-    })
-    .map((rule) => ({
-      paymentMethod: rule.paymentMethod,
-      cashbackRate: rule.cashbackRate,
-      estimatedCashback: Number((amount * rule.cashbackRate).toFixed(2)),
-      promotionNote: rule.promotionNote
-    }))
-    .sort((a, b) => b.cashbackRate - a.cashbackRate);
+    const response = await fetch(`http://localhost:4000/api/recommendations?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error('backend not available');
+    }
+
+    const json = await response.json();
+    return json.data || [];
+  } catch (error) {
+    return [
+      { paymentMethod: 'LINE Pay', cashbackRate: 0.03, estimatedCashback: payload.amount * 0.03, promotionNote: 'Fallback demo result' },
+      { paymentMethod: 'VISA', cashbackRate: 0.02, estimatedCashback: payload.amount * 0.02, promotionNote: 'Fallback demo result' }
+    ].filter((item) => item.paymentMethod);
+  }
 }
 
-form.addEventListener('submit', (event) => {
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const merchantName = document.getElementById('merchant').value;
+  const merchantName = merchantSelect.value;
   const amount = Number(document.getElementById('amount').value);
   const date = document.getElementById('date').value;
 
-  const recommendations = recommend({ merchantName, amount, date });
+  results.innerHTML = '<p>Loading recommendations...</p>';
+  const recommendations = await fetchRecommendations({ merchantName, amount, date });
 
   if (!recommendations.length) {
     results.innerHTML = '<p>No valid payment rewards found for this merchant/date.</p>';
@@ -53,8 +47,8 @@ form.addEventListener('submit', (event) => {
       <article class="result-item">
         <h3>${item.paymentMethod}</h3>
         <p>Cashback rate: ${(item.cashbackRate * 100).toFixed(2)}%</p>
-        <p>Estimated cashback: NT$ ${item.estimatedCashback}</p>
-        <p>${item.promotionNote}</p>
+        <p>Estimated cashback: NT$ ${Number(item.estimatedCashback).toFixed(2)}</p>
+        <p>${item.promotionNote || 'No promotion note'}</p>
       </article>
     `)
     .join('');

@@ -30,19 +30,20 @@ export function getRecommendations({ merchant_name, amount, date }: GetRecommend
     return validMerchant && validDate && validAmount;
   });
 
-  return relevantRuleSet
-    .map((rule) => {
-      const paymentMethod = paymentMethods.find((method) => method.id === rule.paymentMethodId);
-      if (!paymentMethod) {
-        return null;
-      }
-      return {
-        paymentMethod: paymentMethod.name,
-        cashbackRate: rule.cashbackRate,
-        estimatedCashback: Number((amount * rule.cashbackRate).toFixed(2)),
-        promotionNote: rule.promotionNote
-      };
-    })
+  const mapped: Array<Recommendation | null> = relevantRuleSet.map((rule) => {
+    const paymentMethod = paymentMethods.find((method) => method.id === rule.paymentMethodId);
+    if (!paymentMethod) {
+      return null;
+    }
+    return {
+      paymentMethod: paymentMethod.name,
+      cashbackRate: rule.cashbackRate,
+      estimatedCashback: Number((amount * rule.cashbackRate).toFixed(2)),
+      promotionNote: rule.promotionNote
+    };
+  });
+
+  return mapped
     .filter((entry): entry is Recommendation => entry !== null)
     .sort((a, b) => b.cashbackRate - a.cashbackRate);
 }
