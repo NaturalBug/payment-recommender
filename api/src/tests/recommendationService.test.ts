@@ -32,4 +32,14 @@ describe('getRecommendations', () => {
     expect(results[0].paymentMethod).toBe('VISA');
     expect(results[0].cashbackRate).toBeCloseTo(0.015);
   });
+
+  test('ranks cash lower than a reward-bearing method', () => {
+    const results = getRecommendations({
+      merchant_name: 'PX Mart',
+      amount: 1000,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results[0].paymentMethod).toBe('VISA');
+  });
 });

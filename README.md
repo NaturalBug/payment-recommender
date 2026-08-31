@@ -13,13 +13,56 @@ This repo contains a merchant-based MVP that recommends the best payment method 
 ```bash
 export PATH="/tmp/node-v20.17.0-linux-x64/bin:$PATH"
 npm install --workspaces
-npx ts-node api/src/server.ts
+npm run api:dev
+```
+
+Then in a second terminal:
+
+```bash
+python3 -m http.server 4173 --bind 0.0.0.0 --directory web
+```
+
+The UI calls `http://localhost:4000/api/recommendations` when the API is running.
+
+## Admin API
+
+The backend now includes a lightweight admin catalog for merchants and reward rules.
+
+- `GET /api/admin/merchants`
+- `POST /api/admin/merchants` with `{ "merchantName": "MomoMart" }`
+- `GET /api/admin/reward-rules`
+- `POST /api/admin/reward-rules` with rule payload
+- `DELETE /api/admin/reward-rules/:id`
+
+## WSL / Windows access notes
+
+Inside WSL, the app is running correctly on:
+
+- `http://127.0.0.1:4000/api/recommendations?merchant_name=FamilyMart&amount=500&date=2026-08-29`
+- `http://127.0.0.1:4173`
+
+If the Windows browser cannot reach the app via `localhost`, use the WSL virtual interface IP instead. Example:
+
+```bash
+hostname -I
 ```
 
 Then open:
 
-```bash
-python3 -m http.server 4173 --directory web
+```text
+http://<WSL_IP>:4173
+http://<WSL_IP>:4000/api/recommendations?merchant_name=FamilyMart&amount=500&date=2026-08-29
 ```
 
-The UI calls `http://localhost:4000/api/recommendations` when the API is running.
+For example, in this environment the interface IP is `172.24.14.183`, so the browser URL is:
+
+```text
+http://172.24.14.183:4173
+```
+
+If Windows still refuses the port, add a Windows portproxy rule:
+
+```powershell
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=4173 connectaddress=172.24.14.183 connectport=4173
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=4000 connectaddress=172.24.14.183 connectport=4000
+```

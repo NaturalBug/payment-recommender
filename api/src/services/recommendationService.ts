@@ -32,9 +32,7 @@ export function getRecommendations({ merchant_name, amount, date }: GetRecommend
 
   const mapped: Array<Recommendation | null> = relevantRuleSet.map((rule) => {
     const paymentMethod = paymentMethods.find((method) => method.id === rule.paymentMethodId);
-    if (!paymentMethod) {
-      return null;
-    }
+    if (!paymentMethod) return null;
     return {
       paymentMethod: paymentMethod.name,
       cashbackRate: rule.cashbackRate,

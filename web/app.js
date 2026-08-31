@@ -3,30 +3,59 @@ const results = document.getElementById('results');
 const dateInput = document.getElementById('date');
 const merchantSelect = document.getElementById('merchant');
 
-dateInput.value = new Date().toISOString().slice(0, 10);
+const DEFAULT_OPTIONS = {
+  merchantName: 'FamilyMart',
+  amount: 500,
+  date: new Date().toISOString().slice(0, 10)
+};
 
-async function fetchRecommendations(payload) {
+dateInput.value = DEFAULT_OPTIONS.date;
+
+async function fetchMerchants() {
+  const response = await fetch('http://localhost:4000/api/admin/merchants');
+  if (!response.ok) {
+    throw new Error('merchant catalog unavailable');
+  }
+
+  const json = await response.json();
+  return json.data || [];
+}
+
+async function populateMerchantOptions() {
   try {
-    const params = new URLSearchParams({
-      merchant_name: payload.merchantName,
-      amount: String(payload.amount),
-      date: payload.date
-    });
-
-    const response = await fetch(`http://localhost:4000/api/recommendations?${params.toString()}`);
-    if (!response.ok) {
-      throw new Error('backend not available');
+    const merchants = await fetchMerchants();
+    if (!merchants.length) {
+      return;
     }
 
-    const json = await response.json();
-    return json.data || [];
+    merchantSelect.innerHTML = merchants
+      .map((merchant) => `<option value="${merchant}">${merchant}</option>`)
+      .join('');
+
+    if (merchants.includes(DEFAULT_OPTIONS.merchantName)) {
+      merchantSelect.value = DEFAULT_OPTIONS.merchantName;
+    }
   } catch (error) {
-    return [
-      { paymentMethod: 'LINE Pay', cashbackRate: 0.03, estimatedCashback: payload.amount * 0.03, promotionNote: 'Fallback demo result' },
-      { paymentMethod: 'VISA', cashbackRate: 0.02, estimatedCashback: payload.amount * 0.02, promotionNote: 'Fallback demo result' }
-    ].filter((item) => item.paymentMethod);
+    merchantSelect.innerHTML = `<option value="${DEFAULT_OPTIONS.merchantName}">${DEFAULT_OPTIONS.merchantName}</option>`;
   }
 }
+
+async function fetchRecommendations(payload) {
+  const params = new URLSearchParams({
+    merchant_name: payload.merchantName,
+    amount: String(payload.amount),
+    date: payload.date
+  });
+
+  const response = await fetch(`http://localhost:4000/api/recommendations?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error('backend not available');
+  }
+  const json = await response.json();
+  return json.data || [];
+}
+
+populateMerchantOptions();
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -35,21 +64,26 @@ form.addEventListener('submit', async (event) => {
   const date = document.getElementById('date').value;
 
   results.innerHTML = '<p>Loading recommendations...</p>';
-  const recommendations = await fetchRecommendations({ merchantName, amount, date });
 
-  if (!recommendations.length) {
-    results.innerHTML = '<p>No valid payment rewards found for this merchant/date.</p>';
-    return;
+  try {
+    const recommendations = await fetchRecommendations({ merchantName, amount, date });
+
+    if (!recommendations.length) {
+      results.innerHTML = '<p>No valid payment rewards found for this merchant/date.</p>';
+      return;
+    }
+
+    results.innerHTML = recommendations
+      .map((item) => `
+        <article class="result-item">
+          <h3>${item.paymentMethod}</h3>
+          <p>Cashback rate: ${(item.cashbackRate * 100).toFixed(2)}%</p>
+          <p>Estimated cashback: NT$ ${Number(item.estimatedCashback).toFixed(2)}</p>
+          <p>${item.promotionNote || 'No promotion note'}</p>
+        </article>
+      `)
+      .join('');
+  } catch (error) {
+    results.innerHTML = '<p>Backend is not available right now. Please start the API server first.</p>';
   }
-
-  results.innerHTML = recommendations
-    .map((item) => `
-      <article class="result-item">
-        <h3>${item.paymentMethod}</h3>
-        <p>Cashback rate: ${(item.cashbackRate * 100).toFixed(2)}%</p>
-        <p>Estimated cashback: NT$ ${Number(item.estimatedCashback).toFixed(2)}</p>
-        <p>${item.promotionNote || 'No promotion note'}</p>
-      </article>
-    `)
-    .join('');
 });
