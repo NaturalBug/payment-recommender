@@ -1,0 +1,59 @@
+// api/prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Merchant {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  chainName String?
+  category  String?
+  location  String?
+  notes     String?
+
+  acceptedMethods MerchantPaymentAcceptance[]
+  rewardRules     RewardRule[]
+}
+
+model PaymentMethod {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+  type String
+
+  acceptedBy MerchantPaymentAcceptance[]
+  rewardRules RewardRule[]
+}
+
+model MerchantPaymentAcceptance {
+  id Int @id @default(autoincrement())
+
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  merchantId Int
+
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId Int
+
+  @@unique([merchantId, paymentMethodId])
+}
+
+model RewardRule {
+  id Int @id @default(autoincrement())
+
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  merchantId Int
+
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId Int
+
+  cashbackRate    Decimal
+  amountThreshold Int
+  validityStart   DateTime
+  validityEnd     DateTime
+  promotionNote   String?
+}
