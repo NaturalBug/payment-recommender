@@ -1,3 +1,6 @@
+// Legacy in-memory catalog retained for compatibility references only.
+// Runtime API behavior now uses the Prisma-backed repository layer.
+
 export type PaymentMethod = {
   id: string;
   name: string;

@@ -1,16 +1,53 @@
 import { Router } from 'express';
-import { addMerchant, addRewardRule, getMerchantCatalog, getRewardRuleCatalog, removeRewardRule } from '../data';
+import prisma from '../lib/prisma';
+import { createMerchant, listMerchants } from '../repositories/merchantRepository';
+import { createRewardRule, deleteRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
 
 const router = Router();
 
-router.get('/merchants', (_req, res) => {
-  return res.json({
-    success: true,
-    data: getMerchantCatalog()
-  });
+function normalizePaymentMethodKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function legacyPaymentMethodId(paymentMethodName: string): string {
+  const key = normalizePaymentMethodKey(paymentMethodName);
+  const aliases: Record<string, string> = {
+    amexgold: 'amex',
+    linepay: 'linepay',
+    jkopay: 'jko',
+    visa: 'visa',
+    cash: 'cash'
+  };
+
+  return aliases[key] ?? key;
+}
+
+function toLegacyRewardRule(rule: Awaited<ReturnType<typeof listRewardRules>>[number], merchantName: string) {
+  return {
+    id: String(rule.id),
+    merchantName,
+    paymentMethodId: legacyPaymentMethodId(rule.paymentMethodName),
+    cashbackRate: Number(rule.cashbackRate),
+    amountThreshold: rule.amountThreshold,
+    validityStart: rule.validityStart.toISOString().slice(0, 10),
+    validityEnd: rule.validityEnd.toISOString().slice(0, 10),
+    promotionNote: rule.promotionNote ?? undefined
+  };
+}
+
+router.get('/merchants', async (_req, res) => {
+  try {
+    const merchants = await listMerchants();
+    return res.json({ success: true, data: merchants.map((merchant) => merchant.name) });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list merchants'
+    });
+  }
 });
 
-router.post('/merchants', (req, res) => {
+router.post('/merchants', async (req, res) => {
   const merchantName = String(req.body?.merchantName ?? req.body?.name ?? '').trim();
 
   if (!merchantName) {
@@ -21,10 +58,20 @@ router.post('/merchants', (req, res) => {
   }
 
   try {
-    const created = addMerchant(merchantName);
+    const existingMerchants = await listMerchants();
+    const existing = existingMerchants.find((merchant) => merchant.name.toLowerCase() === merchantName.toLowerCase());
+
+    if (existing) {
+      return res.status(201).json({
+        success: true,
+        data: { merchantName: existing.name }
+      });
+    }
+
+    const merchant = await createMerchant(merchantName, merchantName);
     return res.status(201).json({
       success: true,
-      data: { merchantName: created }
+      data: { merchantName: merchant.name }
     });
   } catch (error) {
     return res.status(400).json({
@@ -34,14 +81,25 @@ router.post('/merchants', (req, res) => {
   }
 });
 
-router.get('/reward-rules', (_req, res) => {
-  return res.json({
-    success: true,
-    data: getRewardRuleCatalog()
-  });
+router.get('/reward-rules', async (_req, res) => {
+  try {
+    const merchants = await listMerchants();
+    const merchantNameById = new Map(merchants.map((merchant) => [merchant.id, merchant.name]));
+    const rewardRules = await listRewardRules();
+
+    return res.json({
+      success: true,
+      data: rewardRules.map((rule) => toLegacyRewardRule(rule, merchantNameById.get(rule.merchantId) ?? 'Unknown'))
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list reward rules'
+    });
+  }
 });
 
-router.post('/reward-rules', (req, res) => {
+router.post('/reward-rules', async (req, res) => {
   const { merchantName, paymentMethodId, cashbackRate, amountThreshold, validityStart, validityEnd, promotionNote } = req.body || {};
 
   if (!merchantName || !paymentMethodId || !validityStart || !validityEnd) {
@@ -52,19 +110,40 @@ router.post('/reward-rules', (req, res) => {
   }
 
   try {
-    const createdRule = addRewardRule({
-      merchantName: String(merchantName),
-      paymentMethodId: String(paymentMethodId),
+    const merchants = await listMerchants();
+    const merchant = merchants.find((entry) => entry.name.toLowerCase() === String(merchantName).trim().toLowerCase());
+    if (!merchant) {
+      return res.status(400).json({
+        success: false,
+        message: 'merchant not found'
+      });
+    }
+
+    const paymentMethods = await prisma.paymentMethod.findMany();
+    const paymentMethod = paymentMethods.find((entry) =>
+      normalizePaymentMethodKey(entry.name) === normalizePaymentMethodKey(String(paymentMethodId))
+    );
+
+    if (!paymentMethod) {
+      return res.status(400).json({
+        success: false,
+        message: 'paymentMethodId is invalid'
+      });
+    }
+
+    const createdRule = await createRewardRule({
+      merchantId: merchant.id,
+      paymentMethodId: paymentMethod.id,
       cashbackRate: Number(cashbackRate ?? 0),
       amountThreshold: Number(amountThreshold ?? 0),
-      validityStart: String(validityStart),
-      validityEnd: String(validityEnd),
+      validityStart: new Date(String(validityStart)),
+      validityEnd: new Date(String(validityEnd)),
       promotionNote: promotionNote ? String(promotionNote) : undefined
     });
 
     return res.status(201).json({
       success: true,
-      data: createdRule
+      data: toLegacyRewardRule(createdRule, merchant.name)
     });
   } catch (error) {
     return res.status(400).json({
@@ -74,20 +153,36 @@ router.post('/reward-rules', (req, res) => {
   }
 });
 
-router.delete('/reward-rules/:id', (req, res) => {
-  const deleted = removeRewardRule(req.params.id);
+router.delete('/reward-rules/:id', async (req, res) => {
+  const ruleId = Number(req.params.id);
 
-  if (!deleted) {
+  if (!Number.isInteger(ruleId) || ruleId <= 0) {
     return res.status(404).json({
       success: false,
       message: 'reward rule not found'
     });
   }
 
-  return res.json({
-    success: true,
-    data: { deleted: true }
-  });
+  try {
+    const deleted = await deleteRewardRule(ruleId);
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: 'reward rule not found'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: { deleted: true }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to delete reward rule'
+    });
+  }
 });
 
 export default router;

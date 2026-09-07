@@ -1,10 +1,36 @@
 import request from 'supertest';
 import app from '../app';
-import { resetDataStore } from '../data';
+import prisma from '../lib/prisma';
 
 describe('admin routes', () => {
-  beforeEach(() => {
-    resetDataStore();
+  beforeEach(async () => {
+    await prisma.rewardRule.deleteMany();
+    await prisma.merchantPaymentAcceptance.deleteMany();
+    await prisma.merchant.deleteMany();
+    await prisma.paymentMethod.deleteMany();
+
+    await prisma.paymentMethod.createMany({
+      data: [
+        { name: 'VISA', type: 'credit_card' },
+        { name: 'AMEX Gold', type: 'credit_card' },
+        { name: 'LINE Pay', type: 'mobile_payment' },
+        { name: 'JKO Pay', type: 'mobile_payment' },
+        { name: 'Cash', type: 'debit_card' }
+      ]
+    });
+
+    await prisma.merchant.createMany({
+      data: [
+        { name: 'FamilyMart', chainName: 'FamilyMart' },
+        { name: '7-ELEVEN', chainName: '7-ELEVEN' },
+        { name: 'Starbucks', chainName: 'Starbucks' },
+        { name: 'PX Mart', chainName: 'PX Mart' }
+      ]
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
   });
 
   test('lists merchants from the catalog', async () => {
