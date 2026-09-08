@@ -41,8 +41,8 @@ export async function getRecommendations({
   return relevantRuleSet
     .map((rule) => ({
       paymentMethod: rule.paymentMethodName || 'Unknown',
-      cashbackRate: Number(rule.cashbackRate),
-      estimatedCashback: Number((amount * Number(rule.cashbackRate)).toFixed(2)),
+      cashbackRate: rule.cashbackRate,
+      estimatedCashback: Number((amount * rule.cashbackRate).toFixed(2)),
       promotionNote: rule.promotionNote ?? undefined
     }))
     .sort((a, b) => b.cashbackRate - a.cashbackRate);

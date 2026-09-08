@@ -89,7 +89,14 @@ router.get('/reward-rules', async (_req, res) => {
 
     return res.json({
       success: true,
-      data: rewardRules.map((rule) => toLegacyRewardRule(rule, merchantNameById.get(rule.merchantId) ?? 'Unknown'))
+      data: rewardRules.map((rule) => {
+        const merchantName = merchantNameById.get(rule.merchantId);
+        if (!merchantName) {
+          throw new Error(`merchant ${rule.merchantId} not found`);
+        }
+
+        return toLegacyRewardRule(rule, merchantName);
+      })
     });
   } catch (error) {
     return res.status(500).json({

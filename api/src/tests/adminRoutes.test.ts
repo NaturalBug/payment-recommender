@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '../app';
 import prisma from '../lib/prisma';
+import * as rewardRuleRepository from '../repositories/rewardRuleRepository';
 
 describe('admin routes', () => {
   beforeEach(async () => {
@@ -33,6 +34,10 @@ describe('admin routes', () => {
     await prisma.$disconnect();
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('lists merchants from the catalog', async () => {
     const response = await request(app).get('/api/admin/merchants');
 
@@ -50,6 +55,41 @@ describe('admin routes', () => {
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
     expect(response.body.data.merchantName).toBe('MomoMart');
+  });
+
+  test('returns the existing merchant for a duplicate merchant POST', async () => {
+    const response = await request(app)
+      .post('/api/admin/merchants')
+      .send({ merchantName: ' familymart ' });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({
+      success: true,
+      data: { merchantName: 'FamilyMart' }
+    });
+    await expect(prisma.merchant.count()).resolves.toBe(4);
+  });
+
+  test('fails instead of returning an unknown merchant for an orphaned reward rule', async () => {
+    jest.spyOn(rewardRuleRepository, 'listRewardRules').mockResolvedValue([
+      {
+        id: 1,
+        merchantId: 999999,
+        paymentMethodId: 1,
+        paymentMethodName: 'VISA',
+        cashbackRate: 0.05,
+        amountThreshold: 0,
+        validityStart: new Date('2026-09-01'),
+        validityEnd: new Date('2026-09-30'),
+        promotionNote: null
+      }
+    ]);
+
+    const response = await request(app).get('/api/admin/reward-rules');
+
+    expect(response.status).toBe(500);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toContain('merchant 999999 not found');
   });
 
   test('creates a reward rule for a merchant', async () => {

@@ -1,6 +1,6 @@
 import prisma from '../lib/prisma';
 import { createMerchant, listMerchants } from '../repositories/merchantRepository';
-import { createRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
+import { createRewardRule, deleteRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
 
 describe('repository layer', () => {
   beforeEach(async () => {
@@ -45,5 +45,18 @@ describe('repository layer', () => {
       cashbackRate: 0.05
     });
     expect(typeof persistedRule?.cashbackRate).toBe('number');
+  });
+
+  test('returns false when deleting a missing reward rule', async () => {
+    await expect(deleteRewardRule(999999)).resolves.toBe(false);
+  });
+
+  test('rethrows unexpected delete errors', async () => {
+    const databaseError = new Error('database unavailable');
+    const deleteSpy = jest.spyOn(prisma.rewardRule, 'delete').mockRejectedValueOnce(databaseError);
+
+    await expect(deleteRewardRule(1)).rejects.toBe(databaseError);
+
+    deleteSpy.mockRestore();
   });
 });

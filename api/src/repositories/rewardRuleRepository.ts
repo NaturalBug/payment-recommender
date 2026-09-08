@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import type { RewardRuleRecord } from './types';
 
@@ -76,6 +77,14 @@ export async function createRewardRule(input: {
 }
 
 export async function deleteRewardRule(id: number): Promise<boolean> {
-  const deleted = await prisma.rewardRule.delete({ where: { id } }).catch(() => null);
-  return deleted !== null;
+  try {
+    await prisma.rewardRule.delete({ where: { id } });
+    return true;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return false;
+    }
+
+    throw error;
+  }
 }
