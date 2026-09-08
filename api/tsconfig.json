@@ -5,10 +5,10 @@
     "moduleResolution": "Node",
     "esModuleInterop": true,
     "strict": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
     "skipLibCheck": true,
     "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "prisma/**/*.ts"]
 }
