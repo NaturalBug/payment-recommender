@@ -2,7 +2,9 @@ import { PrismaClient } from '@prisma/client';
 import path from 'node:path';
 import { seedDatabase } from '../../prisma/seed';
 
-const testDatabaseUrl = `file:${path.resolve(__dirname, '../../prisma/test.db')}`;
+const workerId = process.env.JEST_WORKER_ID ?? process.pid.toString();
+const testDatabaseUrl =
+  process.env.DATABASE_URL ?? `file:${path.resolve(__dirname, `../../prisma/test-${workerId}.db`)}`;
 
 async function resetManagedRows(prisma: PrismaClient) {
   await prisma.rewardRule.deleteMany();
