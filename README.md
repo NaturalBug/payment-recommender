@@ -24,6 +24,32 @@ python3 -m http.server 4173 --bind 0.0.0.0 --directory web
 
 The UI calls `http://localhost:4000/api/recommendations` when the API is running.
 
+## Database setup
+
+The API uses Prisma with SQLite for local development. Create the local environment file and initialize the database before starting the API:
+
+```bash
+cd api
+cp .env.example .env
+npx prisma generate
+npx prisma db push
+npm run db:seed
+```
+
+Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the database file in `api/prisma/` and do not commit it; it is already ignored by git.
+
+## Test isolation
+
+Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. For a completely clean setup, remove stale database files before reinitializing:
+
+```bash
+rm -f api/prisma/dev.db api/prisma/test.db
+```
+
+## Future PostgreSQL migration notes
+
+The data access layer is intentionally provider-agnostic: Prisma, repository interfaces, and route/service logic do not embed SQLite-specific SQL. To switch to PostgreSQL later, update `api/prisma/schema.prisma` to use the `postgresql` provider, point `DATABASE_URL` to a PostgreSQL connection string, run `npx prisma generate` and apply the new migration or `npx prisma db push`, and keep the existing API contracts unchanged. The recommendation and admin behavior should not require application code changes beyond database configuration.
+
 ## Admin API
 
 The backend now includes a lightweight admin catalog for merchants and reward rules.
