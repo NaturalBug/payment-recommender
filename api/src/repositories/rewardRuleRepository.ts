@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { RepositoryConflictError, RepositoryValidationError } from './errors';
 import type { RewardRuleRecord } from './types';
 
 type RewardRuleRow = {
@@ -60,20 +61,50 @@ export async function createRewardRule(input: {
   validityEnd: Date;
   promotionNote?: string;
 }): Promise<RewardRuleRecord> {
-  const rule = await prisma.rewardRule.create({
-    data: {
-      merchantId: input.merchantId,
-      paymentMethodId: input.paymentMethodId,
-      cashbackRate: input.cashbackRate,
-      amountThreshold: input.amountThreshold,
-      validityStart: input.validityStart,
-      validityEnd: input.validityEnd,
-      promotionNote: input.promotionNote ?? null
-    },
-    select: rewardRuleSelect
-  });
+  try {
+    const rule = await prisma.$transaction(async (transaction) => {
+      await transaction.merchantPaymentAcceptance.upsert({
+        where: {
+          merchantId_paymentMethodId: {
+            merchantId: input.merchantId,
+            paymentMethodId: input.paymentMethodId
+          }
+        },
+        update: {},
+        create: {
+          merchantId: input.merchantId,
+          paymentMethodId: input.paymentMethodId
+        }
+      });
 
-  return toRewardRuleRecord(rule);
+      return transaction.rewardRule.create({
+        data: {
+          merchantId: input.merchantId,
+          paymentMethodId: input.paymentMethodId,
+          cashbackRate: input.cashbackRate,
+          amountThreshold: input.amountThreshold,
+          validityStart: input.validityStart,
+          validityEnd: input.validityEnd,
+          promotionNote: input.promotionNote ?? null
+        },
+        select: rewardRuleSelect
+      });
+    });
+
+    return toRewardRuleRecord(rule);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        throw new RepositoryConflictError('reward rule conflicts with an existing record');
+      }
+
+      if (error.code === 'P2003') {
+        throw new RepositoryValidationError('merchant or payment method is invalid');
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function deleteRewardRule(id: number): Promise<boolean> {

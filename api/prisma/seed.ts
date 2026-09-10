@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import { normalizeMerchantName } from '../src/lib/normalization';
+import { getDatabaseUrl } from '../src/config/env';
 
 export const merchants = [
   { name: 'FamilyMart', chainName: 'FamilyMart' },
@@ -41,8 +43,12 @@ export async function seedDatabase(prisma: PrismaClient) {
   for (const merchant of merchants) {
     await prisma.merchant.upsert({
       where: { name: merchant.name },
-      update: {},
-      create: { name: merchant.name, chainName: merchant.chainName }
+      update: { normalizedName: normalizeMerchantName(merchant.name) },
+      create: {
+        name: merchant.name,
+        normalizedName: normalizeMerchantName(merchant.name),
+        chainName: merchant.chainName
+      }
     });
   }
 
@@ -103,7 +109,11 @@ export async function seedDatabase(prisma: PrismaClient) {
 }
 
 async function main() {
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({
+    datasources: {
+      db: { url: getDatabaseUrl() }
+    }
+  });
 
   try {
     await seedDatabase(prisma);

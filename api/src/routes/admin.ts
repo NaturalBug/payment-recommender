@@ -1,32 +1,23 @@
 import { Router } from 'express';
-import prisma from '../lib/prisma';
-import { createMerchant, listMerchants } from '../repositories/merchantRepository';
+import { createMerchant, findMerchantByName, listMerchants } from '../repositories/merchantRepository';
+import {
+  findPaymentMethodByLegacyIdOrName,
+  toLegacyPaymentMethodId
+} from '../repositories/paymentMethodRepository';
 import { createRewardRule, deleteRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
+import {
+  MerchantAlreadyExistsError,
+  RepositoryConflictError,
+  RepositoryValidationError
+} from '../repositories/errors';
 
 const router = Router();
-
-function normalizePaymentMethodKey(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function legacyPaymentMethodId(paymentMethodName: string): string {
-  const key = normalizePaymentMethodKey(paymentMethodName);
-  const aliases: Record<string, string> = {
-    amexgold: 'amex',
-    linepay: 'linepay',
-    jkopay: 'jko',
-    visa: 'visa',
-    cash: 'cash'
-  };
-
-  return aliases[key] ?? key;
-}
 
 function toLegacyRewardRule(rule: Awaited<ReturnType<typeof listRewardRules>>[number], merchantName: string) {
   return {
     id: String(rule.id),
     merchantName,
-    paymentMethodId: legacyPaymentMethodId(rule.paymentMethodName),
+    paymentMethodId: toLegacyPaymentMethodId(rule.paymentMethodName),
     cashbackRate: Number(rule.cashbackRate),
     amountThreshold: rule.amountThreshold,
     validityStart: rule.validityStart.toISOString().slice(0, 10),
@@ -58,23 +49,17 @@ router.post('/merchants', async (req, res) => {
   }
 
   try {
-    const existingMerchants = await listMerchants();
-    const existing = existingMerchants.find((merchant) => merchant.name.toLowerCase() === merchantName.toLowerCase());
-
-    if (existing) {
-      return res.status(201).json({
-        success: true,
-        data: { merchantName: existing.name }
-      });
-    }
-
     const merchant = await createMerchant(merchantName, merchantName);
     return res.status(201).json({
       success: true,
       data: { merchantName: merchant.name }
     });
   } catch (error) {
-    return res.status(400).json({
+    if (error instanceof MerchantAlreadyExistsError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+
+    return res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'unable to create merchant'
     });
@@ -108,17 +93,36 @@ router.get('/reward-rules', async (_req, res) => {
 
 router.post('/reward-rules', async (req, res) => {
   const { merchantName, paymentMethodId, cashbackRate, amountThreshold, validityStart, validityEnd, promotionNote } = req.body || {};
+  const merchantNameValue = String(merchantName ?? '').trim();
+  const paymentMethodValue = String(paymentMethodId ?? '').trim();
+  const cashbackRateValue = Number(cashbackRate ?? 0);
+  const amountThresholdValue = Number(amountThreshold ?? 0);
+  const validityStartValue = new Date(String(validityStart ?? ''));
+  const validityEndValue = new Date(String(validityEnd ?? ''));
 
-  if (!merchantName || !paymentMethodId || !validityStart || !validityEnd) {
+  if (!merchantNameValue || !paymentMethodValue || !validityStart || !validityEnd) {
     return res.status(400).json({
       success: false,
       message: 'merchantName, paymentMethodId, validityStart, and validityEnd are required'
     });
   }
 
+  if (
+    !Number.isFinite(cashbackRateValue) ||
+    !Number.isFinite(amountThresholdValue) ||
+    amountThresholdValue < 0 ||
+    Number.isNaN(validityStartValue.getTime()) ||
+    Number.isNaN(validityEndValue.getTime()) ||
+    validityEndValue < validityStartValue
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'cashbackRate, amountThreshold, and validity dates must be valid'
+    });
+  }
+
   try {
-    const merchants = await listMerchants();
-    const merchant = merchants.find((entry) => entry.name.toLowerCase() === String(merchantName).trim().toLowerCase());
+    const merchant = await findMerchantByName(merchantNameValue);
     if (!merchant) {
       return res.status(400).json({
         success: false,
@@ -126,10 +130,7 @@ router.post('/reward-rules', async (req, res) => {
       });
     }
 
-    const paymentMethods = await prisma.paymentMethod.findMany();
-    const paymentMethod = paymentMethods.find((entry) =>
-      normalizePaymentMethodKey(entry.name) === normalizePaymentMethodKey(String(paymentMethodId))
-    );
+    const paymentMethod = await findPaymentMethodByLegacyIdOrName(paymentMethodValue);
 
     if (!paymentMethod) {
       return res.status(400).json({
@@ -141,10 +142,10 @@ router.post('/reward-rules', async (req, res) => {
     const createdRule = await createRewardRule({
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
-      cashbackRate: Number(cashbackRate ?? 0),
-      amountThreshold: Number(amountThreshold ?? 0),
-      validityStart: new Date(String(validityStart)),
-      validityEnd: new Date(String(validityEnd)),
+      cashbackRate: cashbackRateValue,
+      amountThreshold: amountThresholdValue,
+      validityStart: validityStartValue,
+      validityEnd: validityEndValue,
       promotionNote: promotionNote ? String(promotionNote) : undefined
     });
 
@@ -153,7 +154,15 @@ router.post('/reward-rules', async (req, res) => {
       data: toLegacyRewardRule(createdRule, merchant.name)
     });
   } catch (error) {
-    return res.status(400).json({
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+
+    return res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'unable to create reward rule'
     });

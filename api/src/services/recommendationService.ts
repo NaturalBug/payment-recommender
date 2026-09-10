@@ -1,4 +1,5 @@
-import { listMerchants } from '../repositories/merchantRepository';
+import { normalizeMerchantName } from '../lib/normalization';
+import { listAcceptedPaymentMethodIds, listMerchants } from '../repositories/merchantRepository';
 import { listRewardRules } from '../repositories/rewardRuleRepository';
 
 export type Recommendation = {
@@ -19,14 +20,19 @@ export async function getRecommendations({
   amount,
   date
 }: GetRecommendationsInput): Promise<Recommendation[]> {
-  const normalizedMerchant = merchant_name.trim();
+  const normalizedMerchant = normalizeMerchantName(merchant_name);
   const merchants = await listMerchants();
-  const rewardRules = await listRewardRules();
 
-  const merchant = merchants.find((entry) => entry.name.toLowerCase() === normalizedMerchant.toLowerCase());
+  const merchant = merchants.find((entry) => normalizeMerchantName(entry.name) === normalizedMerchant);
   if (!merchant) {
     return [];
   }
+
+  const [rewardRules, acceptedPaymentMethodIds] = await Promise.all([
+    listRewardRules(),
+    listAcceptedPaymentMethodIds(merchant.id)
+  ]);
+  const acceptedPaymentMethodIdSet = new Set(acceptedPaymentMethodIds);
 
   const relevantRuleSet = rewardRules.filter((rule) => {
     const validityStart = new Date(rule.validityStart);
@@ -35,7 +41,7 @@ export async function getRecommendations({
     const validDate = date >= validityStart && date <= validityEnd;
     const validAmount = amount >= rule.amountThreshold;
 
-    return validMerchant && validDate && validAmount;
+    return validMerchant && acceptedPaymentMethodIdSet.has(rule.paymentMethodId) && validDate && validAmount;
   });
 
   return relevantRuleSet

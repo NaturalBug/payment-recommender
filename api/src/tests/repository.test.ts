@@ -45,6 +45,16 @@ describe('repository layer', () => {
       cashbackRate: 0.05
     });
     expect(typeof persistedRule?.cashbackRate).toBe('number');
+    await expect(
+      prisma.merchantPaymentAcceptance.findUnique({
+        where: {
+          merchantId_paymentMethodId: {
+            merchantId: merchant.id,
+            paymentMethodId: paymentMethod.id
+          }
+        }
+      })
+    ).resolves.not.toBeNull();
   });
 
   test('returns false when deleting a missing reward rule', async () => {

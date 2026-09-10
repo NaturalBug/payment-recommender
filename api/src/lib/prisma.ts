@@ -1,9 +1,10 @@
 import { PrismaClient } from '@prisma/client';
+import { getDatabaseUrl } from '../config/env';
 
 const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: process.env.DATABASE_URL ?? 'file:./prisma/dev.db'
+      url: getDatabaseUrl()
     }
   }
 });

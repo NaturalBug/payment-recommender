@@ -18,16 +18,37 @@ describe('getRecommendations', () => {
       ]
     });
 
-    const familyMart = await prisma.merchant.create({ data: { name: 'FamilyMart', chainName: 'FamilyMart' } });
-    const sevenEleven = await prisma.merchant.create({ data: { name: '7-ELEVEN', chainName: '7-ELEVEN' } });
-    const starbucks = await prisma.merchant.create({ data: { name: 'Starbucks', chainName: 'Starbucks' } });
-    const pxMart = await prisma.merchant.create({ data: { name: 'PX Mart', chainName: 'PX Mart' } });
+    const familyMart = await prisma.merchant.create({
+      data: { name: 'FamilyMart', normalizedName: 'familymart', chainName: 'FamilyMart' }
+    });
+    const sevenEleven = await prisma.merchant.create({
+      data: { name: '7-ELEVEN', normalizedName: '7-eleven', chainName: '7-ELEVEN' }
+    });
+    const starbucks = await prisma.merchant.create({
+      data: { name: 'Starbucks', normalizedName: 'starbucks', chainName: 'Starbucks' }
+    });
+    const pxMart = await prisma.merchant.create({
+      data: { name: 'PX Mart', normalizedName: 'px mart', chainName: 'PX Mart' }
+    });
 
     const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
     const linePay = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'LINE Pay' } });
     const amex = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
     const jko = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'JKO Pay' } });
     const cash = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'Cash' } });
+
+    await prisma.merchantPaymentAcceptance.createMany({
+      data: [
+        { merchantId: familyMart.id, paymentMethodId: linePay.id },
+        { merchantId: familyMart.id, paymentMethodId: visa.id },
+        { merchantId: sevenEleven.id, paymentMethodId: linePay.id },
+        { merchantId: sevenEleven.id, paymentMethodId: jko.id },
+        { merchantId: starbucks.id, paymentMethodId: amex.id },
+        { merchantId: starbucks.id, paymentMethodId: visa.id },
+        { merchantId: pxMart.id, paymentMethodId: cash.id },
+        { merchantId: pxMart.id, paymentMethodId: visa.id }
+      ]
+    });
 
     await prisma.rewardRule.createMany({
       data: [
@@ -151,5 +172,30 @@ describe('getRecommendations', () => {
     });
 
     expect(results[0].paymentMethod).toBe('VISA');
+  });
+
+  test('filters out reward rules for payment methods the merchant does not accept', async () => {
+    const familyMart = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const amex = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
+
+    await prisma.rewardRule.create({
+      data: {
+        merchantId: familyMart.id,
+        paymentMethodId: amex.id,
+        cashbackRate: 0.05,
+        amountThreshold: 0,
+        validityStart: new Date('2026-01-01T00:00:00.000Z'),
+        validityEnd: new Date('2026-12-31T23:59:59.999Z'),
+        promotionNote: 'Unaccepted method'
+      }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: 'FamilyMart',
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results.map((result) => result.paymentMethod)).toEqual(['LINE Pay', 'VISA']);
   });
 });

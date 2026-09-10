@@ -9,8 +9,9 @@ datasource db {
 }
 
 model Merchant {
-  id   Int    @id @default(autoincrement())
-  name String @unique
+  id             Int    @id @default(autoincrement())
+  name           String @unique
+  normalizedName String @unique
 
   chainName String?
   category  String?

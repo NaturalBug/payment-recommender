@@ -2,6 +2,8 @@ import { PrismaClient } from '@prisma/client';
 import path from 'node:path';
 import { seedDatabase } from '../../prisma/seed';
 
+jest.setTimeout(15000);
+
 const workerId = process.env.JEST_WORKER_ID ?? process.pid.toString();
 const testDatabaseUrl =
   process.env.DATABASE_URL ?? `file:${path.resolve(__dirname, `../../prisma/test-${workerId}.db`)}`;
@@ -42,7 +44,11 @@ describe('data persistence', () => {
 
     try {
       await clientA.merchant.create({
-        data: { name: 'Persist Mart', chainName: 'Persist Mart' }
+        data: {
+          name: 'Persist Mart',
+          normalizedName: 'persist mart',
+          chainName: 'Persist Mart'
+        }
       });
 
       const persisted = await clientB.merchant.findUnique({

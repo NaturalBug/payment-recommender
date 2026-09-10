@@ -7,6 +7,12 @@ export type MerchantRecord = {
   notes?: string | null;
 };
 
+export type PaymentMethodRecord = {
+  id: number;
+  name: string;
+  type: string;
+};
+
 export type RewardRuleRecord = {
   id: number;
   merchantId: number;
