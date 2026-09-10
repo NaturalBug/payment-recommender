@@ -2,6 +2,7 @@ const form = document.getElementById('recommendation-form');
 const results = document.getElementById('results');
 const dateInput = document.getElementById('date');
 const merchantSelect = document.getElementById('merchant');
+const apiBaseUrl = `http://${window.location.hostname}:4000`;
 
 const DEFAULT_OPTIONS = {
   merchantName: 'FamilyMart',
@@ -12,7 +13,7 @@ const DEFAULT_OPTIONS = {
 dateInput.value = DEFAULT_OPTIONS.date;
 
 async function fetchMerchants() {
-  const response = await fetch('http://localhost:4000/api/admin/merchants');
+  const response = await fetch(`${apiBaseUrl}/api/admin/merchants`);
   if (!response.ok) {
     throw new Error('merchant catalog unavailable');
   }
@@ -47,7 +48,7 @@ async function fetchRecommendations(payload) {
     date: payload.date
   });
 
-  const response = await fetch(`http://localhost:4000/api/recommendations?${params.toString()}`);
+  const response = await fetch(`${apiBaseUrl}/api/recommendations?${params.toString()}`);
   if (!response.ok) {
     throw new Error('backend not available');
   }
