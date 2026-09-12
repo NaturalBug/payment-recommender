@@ -5,8 +5,14 @@ const refreshCatalogButton = document.getElementById('refresh-catalog');
 const catalogStatus = document.getElementById('catalog-status');
 const rewardRules = document.getElementById('reward-rules');
 const adminApiKeyInput = document.getElementById('admin-api-key');
+const connectAdminButton = document.getElementById('connect-admin');
+const catalogControls = document.getElementById('catalog-controls');
 const apiBaseUrl = `http://${window.location.hostname}:4000`;
 const today = new Date().toISOString().slice(0, 10);
+
+let adminApiKey = '';
+
+refreshCatalogButton.disabled = true;
 
 document.getElementById('validity-start').value = today;
 document.getElementById('validity-end').value = today;
@@ -21,7 +27,6 @@ function escapeHtml(value) {
 }
 
 async function requestJson(path, options = {}) {
-  const adminApiKey = adminApiKeyInput.value.trim();
   const response = await fetch(`${apiBaseUrl}${path}`, {
     headers: {
       'Content-Type': 'application/json',
@@ -36,6 +41,35 @@ async function requestJson(path, options = {}) {
   }
 
   return json;
+}
+
+async function connectAdmin() {
+  const candidateKey = adminApiKeyInput.value.trim();
+
+  if (!candidateKey) {
+    setCatalogStatus('Enter an Admin API key before connecting.', true);
+    return;
+  }
+
+  adminApiKey = candidateKey;
+  catalogControls.disabled = true;
+  refreshCatalogButton.disabled = true;
+  connectAdminButton.disabled = true;
+  connectAdminButton.textContent = 'Connecting...';
+  setCatalogStatus('Connecting...');
+
+  try {
+    await refreshCatalog();
+    catalogControls.disabled = false;
+    refreshCatalogButton.disabled = false;
+    connectAdminButton.textContent = 'Connected';
+  } catch (error) {
+    adminApiKey = '';
+    connectAdminButton.textContent = 'Connect';
+    setCatalogStatus(error.message, true);
+  } finally {
+    connectAdminButton.disabled = false;
+  }
 }
 
 async function fetchMerchants() {
@@ -92,15 +126,20 @@ function setCatalogStatus(message, isError = false) {
 }
 
 async function refreshCatalog() {
+  const [merchants, rules] = await Promise.all([fetchMerchants(), fetchRewardRules()]);
+  renderMerchantOptions(merchants);
+  renderRewardRules(rules);
+  setCatalogStatus(`Loaded ${merchants.length} merchants and ${rules.length} reward rules.`);
+}
+
+connectAdminButton.addEventListener('click', connectAdmin);
+refreshCatalogButton.addEventListener('click', async () => {
   try {
-    const [merchants, rules] = await Promise.all([fetchMerchants(), fetchRewardRules()]);
-    renderMerchantOptions(merchants);
-    renderRewardRules(rules);
-    setCatalogStatus(`Loaded ${merchants.length} merchants and ${rules.length} reward rules.`);
+    await refreshCatalog();
   } catch (error) {
     setCatalogStatus(error.message, true);
   }
-}
+});
 
 merchantForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -141,8 +180,6 @@ rewardRuleForm.addEventListener('submit', async (event) => {
   }
 });
 
-refreshCatalogButton.addEventListener('click', refreshCatalog);
-
 rewardRules.addEventListener('click', async (event) => {
   const button = event.target.closest('.delete-rule');
   if (!button) {
@@ -160,4 +197,4 @@ rewardRules.addEventListener('click', async (event) => {
   }
 });
 
-refreshCatalog();
+setCatalogStatus('Enter your Admin API key and connect to load the catalog.');
