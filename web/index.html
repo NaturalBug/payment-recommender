@@ -9,14 +9,12 @@
   <body>
     <main class="container">
       <h1>Best payment method</h1>
-      <form id="recommendation-form">
+      <section class="panel">
+        <h2>Recommendation</h2>
+        <form id="recommendation-form">
         <label>
           Merchant
           <select id="merchant" required>
-            <option value="FamilyMart">FamilyMart</option>
-            <option value="7-ELEVEN">7-ELEVEN</option>
-            <option value="Starbucks">Starbucks</option>
-            <option value="PX Mart">PX Mart</option>
           </select>
         </label>
 
@@ -30,10 +28,82 @@
           <input id="date" type="date" required />
         </label>
 
-        <button type="submit">Recommend</button>
-      </form>
+          <button type="submit">Recommend</button>
+        </form>
 
-      <section id="results" aria-live="polite"></section>
+        <section id="results" aria-live="polite"></section>
+      </section>
+
+      <section class="panel" aria-labelledby="catalog-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Admin catalog</p>
+            <h2 id="catalog-heading">Manage merchants and reward rules</h2>
+          </div>
+          <button id="refresh-catalog" class="secondary-button" type="button">Refresh</button>
+        </div>
+
+        <div id="catalog-status" class="status" role="status" aria-live="polite"></div>
+
+        <div class="catalog-grid">
+          <form id="merchant-form" class="catalog-form">
+            <h3>Add merchant</h3>
+            <label>
+              Merchant name
+              <input id="merchant-name" name="merchantName" type="text" required maxlength="120" />
+            </label>
+            <button type="submit">Add merchant</button>
+          </form>
+
+          <form id="reward-rule-form" class="catalog-form">
+            <h3>Add reward rule</h3>
+            <label>
+              Merchant
+              <select id="rule-merchant" name="merchantName" required></select>
+            </label>
+            <label>
+              Payment method
+              <select id="payment-method" name="paymentMethodId" required>
+                <option value="visa">VISA</option>
+                <option value="amex">AMEX Gold</option>
+                <option value="linepay">LINE Pay</option>
+                <option value="jko">JKO Pay</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
+            <div class="form-row">
+              <label>
+                Cashback rate
+                <input id="cashback-rate" name="cashbackRate" type="number" min="0" step="0.001" value="0.01" required />
+              </label>
+              <label>
+                Amount threshold
+                <input id="amount-threshold" name="amountThreshold" type="number" min="0" step="1" value="0" required />
+              </label>
+            </div>
+            <div class="form-row">
+              <label>
+                Valid from
+                <input id="validity-start" name="validityStart" type="date" required />
+              </label>
+              <label>
+                Valid until
+                <input id="validity-end" name="validityEnd" type="date" required />
+              </label>
+            </div>
+            <label>
+              Promotion note
+              <textarea id="promotion-note" name="promotionNote" rows="2" maxlength="500"></textarea>
+            </label>
+            <button type="submit">Add reward rule</button>
+          </form>
+        </div>
+
+        <div class="rules-section">
+          <h3>Reward rules</h3>
+          <div id="reward-rules" class="table-wrapper"></div>
+        </div>
+      </section>
     </main>
 
     <script src="app.js"></script>
