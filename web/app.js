@@ -25,13 +25,9 @@ async function fetchMerchants() {
 async function populateMerchantOptions() {
   try {
     const merchants = await fetchMerchants();
-    if (!merchants.length) {
-      return;
-    }
-
-    merchantSelect.innerHTML = merchants
-      .map((merchant) => `<option value="${merchant}">${merchant}</option>`)
-      .join('');
+    merchantSelect.innerHTML = merchants.length
+      ? merchants.map((merchant) => `<option value="${merchant}">${merchant}</option>`).join('')
+      : '<option value="">No merchants available</option>';
 
     if (merchants.includes(DEFAULT_OPTIONS.merchantName)) {
       merchantSelect.value = DEFAULT_OPTIONS.merchantName;
@@ -62,7 +58,7 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const merchantName = merchantSelect.value;
   const amount = Number(document.getElementById('amount').value);
-  const date = document.getElementById('date').value;
+  const date = dateInput.value;
 
   results.innerHTML = '<p>Loading recommendations...</p>';
 

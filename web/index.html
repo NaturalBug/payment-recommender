@@ -8,16 +8,17 @@
   </head>
   <body>
     <main class="container">
-      <h1>Best payment method</h1>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="active" href="index.html">Recommendation</a>
+        <a href="admin.html">Admin Catalog</a>
+      </nav>
+
+      <p class="eyebrow">Payment recommendation</p>
+      <h1>Find the best payment method</h1>
       <form id="recommendation-form">
         <label>
           Merchant
-          <select id="merchant" required>
-            <option value="FamilyMart">FamilyMart</option>
-            <option value="7-ELEVEN">7-ELEVEN</option>
-            <option value="Starbucks">Starbucks</option>
-            <option value="PX Mart">PX Mart</option>
-          </select>
+          <select id="merchant" required></select>
         </label>
 
         <label>

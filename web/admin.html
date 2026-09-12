@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Catalog</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="index.html">Recommendation</a>
+        <a class="active" href="admin.html">Admin Catalog</a>
+      </nav>
+
+      <p class="eyebrow">Admin catalog</p>
+      <h1>Manage merchants and reward rules</h1>
+      <div class="section-heading">
+        <p class="muted">Maintain the catalog used by the recommendation page.</p>
+        <button id="refresh-catalog" class="secondary-button" type="button">Refresh</button>
+      </div>
+
+      <div id="catalog-status" class="status" role="status" aria-live="polite"></div>
+
+      <div class="catalog-grid">
+        <form id="merchant-form" class="catalog-form">
+          <h2>Add merchant</h2>
+          <label>
+            Merchant name
+            <input id="merchant-name" name="merchantName" type="text" required maxlength="120" />
+          </label>
+          <button type="submit">Add merchant</button>
+        </form>
+
+        <form id="reward-rule-form" class="catalog-form">
+          <h2>Add reward rule</h2>
+          <label>
+            Merchant
+            <select id="rule-merchant" name="merchantName" required></select>
+          </label>
+          <label>
+            Payment method
+            <select id="payment-method" name="paymentMethodId" required>
+              <option value="visa">VISA</option>
+              <option value="amex">AMEX Gold</option>
+              <option value="linepay">LINE Pay</option>
+              <option value="jko">JKO Pay</option>
+              <option value="cash">Cash</option>
+            </select>
+          </label>
+          <div class="form-row">
+            <label>
+              Cashback rate
+              <input id="cashback-rate" name="cashbackRate" type="number" min="0" step="0.001" value="0.01" required />
+            </label>
+            <label>
+              Amount threshold
+              <input id="amount-threshold" name="amountThreshold" type="number" min="0" step="1" value="0" required />
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              Valid from
+              <input id="validity-start" name="validityStart" type="date" required />
+            </label>
+            <label>
+              Valid until
+              <input id="validity-end" name="validityEnd" type="date" required />
+            </label>
+          </div>
+          <label>
+            Promotion note
+            <textarea id="promotion-note" name="promotionNote" rows="2" maxlength="500"></textarea>
+          </label>
+          <button type="submit">Add reward rule</button>
+        </form>
+      </div>
+
+      <section class="rules-section">
+        <h2>Reward rules</h2>
+        <div id="reward-rules" class="table-wrapper"></div>
+      </section>
+    </main>
+
+    <script src="admin.js"></script>
+  </body>
+</html>
