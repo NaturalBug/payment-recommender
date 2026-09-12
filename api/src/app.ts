@@ -1,4 +1,5 @@
 import express from 'express';
+import prisma from './lib/prisma';
 import adminRouter from './routes/admin';
 import recommendationsRouter from './routes/recommendations';
 
@@ -17,6 +18,22 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.status(200).json({
+      status: 'ok',
+      database: 'ok'
+    });
+  } catch {
+    return res.status(503).json({
+      status: 'error',
+      database: 'unavailable'
+    });
+  }
+});
+
 app.use('/api/admin', adminRouter);
 app.use('/api/recommendations', recommendationsRouter);
 
