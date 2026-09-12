@@ -48,6 +48,11 @@ npm run db:seed
 
 Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the database file in `api/prisma/` and do not commit it; it is already ignored by git.
 
+Set `ADMIN_API_KEY` in `api/.env` before using the Admin Catalog page. The key
+must be sent in the `X-Admin-API-Key` header for every `/api/admin/*` request.
+The Admin Catalog page asks for this key and keeps it only in the current page;
+you must enter it again after reloading the page.
+
 ## Test isolation
 
 Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. For a completely clean setup, remove stale database files before reinitializing:
@@ -69,6 +74,9 @@ The backend now includes a lightweight admin catalog for merchants and reward ru
 - `GET /api/admin/reward-rules`
 - `POST /api/admin/reward-rules` with rule payload
 - `DELETE /api/admin/reward-rules/:id`
+
+All Admin API endpoints require `X-Admin-API-Key`. Requests without a key
+return `401`; requests with an incorrect key return `403`.
 
 ## Continuous integration
 

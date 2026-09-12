@@ -4,6 +4,7 @@ const rewardRuleForm = document.getElementById('reward-rule-form');
 const refreshCatalogButton = document.getElementById('refresh-catalog');
 const catalogStatus = document.getElementById('catalog-status');
 const rewardRules = document.getElementById('reward-rules');
+const adminApiKeyInput = document.getElementById('admin-api-key');
 const apiBaseUrl = `http://${window.location.hostname}:4000`;
 const today = new Date().toISOString().slice(0, 10);
 
@@ -20,8 +21,12 @@ function escapeHtml(value) {
 }
 
 async function requestJson(path, options = {}) {
+  const adminApiKey = adminApiKeyInput.value.trim();
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-API-Key': adminApiKey
+    },
     ...options
   });
   const json = await response.json();
