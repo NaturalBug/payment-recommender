@@ -50,8 +50,8 @@ Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the
 
 Set `ADMIN_API_KEY` in `api/.env` before using the Admin Catalog page. The key
 must be sent in the `X-Admin-API-Key` header for every `/api/admin/*` request.
-The Admin Catalog page asks for this key and keeps it only in the browser
-session.
+The Admin Catalog page asks for this key and keeps it only in the current page;
+you must enter it again after reloading the page.
 
 ## Test isolation
 

@@ -8,7 +8,6 @@ const adminApiKeyInput = document.getElementById('admin-api-key');
 const apiBaseUrl = `http://${window.location.hostname}:4000`;
 const today = new Date().toISOString().slice(0, 10);
 
-adminApiKeyInput.value = sessionStorage.getItem('adminApiKey') || '';
 document.getElementById('validity-start').value = today;
 document.getElementById('validity-end').value = today;
 
@@ -23,7 +22,6 @@ function escapeHtml(value) {
 
 async function requestJson(path, options = {}) {
   const adminApiKey = adminApiKeyInput.value.trim();
-  sessionStorage.setItem('adminApiKey', adminApiKey);
   const response = await fetch(`${apiBaseUrl}${path}`, {
     headers: {
       'Content-Type': 'application/json',
