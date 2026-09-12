@@ -28,3 +28,13 @@ export function getPort(): number {
 
   return port;
 }
+
+export function getAdminApiKey(): string {
+  const apiKey = process.env.ADMIN_API_KEY?.trim();
+
+  if (!apiKey) {
+    throw new Error('ADMIN_API_KEY is required to access the admin API');
+  }
+
+  return apiKey;
+}

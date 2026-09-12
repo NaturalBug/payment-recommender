@@ -40,7 +40,7 @@ describe('admin routes', () => {
   });
 
   test('lists merchants from the catalog', async () => {
-    const response = await request(app).get('/api/admin/merchants');
+    const response = await request(app).get('/api/admin/merchants').set('X-Admin-API-Key', 'test-admin-key');
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -51,6 +51,7 @@ describe('admin routes', () => {
   test('creates a new merchant', async () => {
     const response = await request(app)
       .post('/api/admin/merchants')
+      .set('X-Admin-API-Key', 'test-admin-key')
       .send({ merchantName: 'MomoMart' });
 
     expect(response.status).toBe(201);
@@ -61,6 +62,7 @@ describe('admin routes', () => {
   test('returns a conflict for a duplicate merchant POST', async () => {
     const response = await request(app)
       .post('/api/admin/merchants')
+      .set('X-Admin-API-Key', 'test-admin-key')
       .send({ merchantName: ' familymart ' });
 
     expect(response.status).toBe(409);
@@ -74,6 +76,7 @@ describe('admin routes', () => {
 
     const response = await request(app)
       .post('/api/admin/merchants')
+      .set('X-Admin-API-Key', 'test-admin-key')
       .send({ merchantName: 'MomoMart' });
 
     expect(response.status).toBe(500);
@@ -96,7 +99,7 @@ describe('admin routes', () => {
       }
     ]);
 
-    const response = await request(app).get('/api/admin/reward-rules');
+    const response = await request(app).get('/api/admin/reward-rules').set('X-Admin-API-Key', 'test-admin-key');
 
     expect(response.status).toBe(500);
     expect(response.body.success).toBe(false);
@@ -106,6 +109,7 @@ describe('admin routes', () => {
   test('creates a reward rule for a merchant', async () => {
     const response = await request(app)
       .post('/api/admin/reward-rules')
+      .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
         paymentMethodId: 'visa',
@@ -137,6 +141,7 @@ describe('admin routes', () => {
 
     const response = await request(app)
       .post('/api/admin/reward-rules')
+      .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
         paymentMethodId: 'visa',
