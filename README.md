@@ -24,6 +24,16 @@ python3 -m http.server 4173 --bind 0.0.0.0 --directory web
 
 The UI calls `http://localhost:4000/api/recommendations` when the API is running.
 
+Check API and database availability with:
+
+```bash
+curl http://localhost:4000/health
+```
+
+The endpoint returns HTTP `200` with `{"status":"ok","database":"ok"}` when both
+the API and database are available. It returns HTTP `503` when the database
+connection check fails.
+
 ## Database setup
 
 The API uses Prisma with SQLite for local development. Create the local environment file and initialize the database before starting the API:
@@ -59,6 +69,13 @@ The backend now includes a lightweight admin catalog for merchants and reward ru
 - `GET /api/admin/reward-rules`
 - `POST /api/admin/reward-rules` with rule payload
 - `DELETE /api/admin/reward-rules/:id`
+
+## Continuous integration
+
+GitHub Actions runs on pushes to the main development branches and pull
+requests targeting `master`. The workflow installs dependencies, generates the
+Prisma client, runs API tests, builds the API, and checks frontend JavaScript
+syntax.
 
 ## WSL / Windows access notes
 
