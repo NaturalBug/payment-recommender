@@ -20,23 +20,27 @@
         <button id="refresh-catalog" class="secondary-button" type="button">Refresh</button>
       </div>
 
-      <label>
-        Admin API key
-        <input id="admin-api-key" type="password" autocomplete="off" placeholder="Enter ADMIN_API_KEY" />
-      </label>
+      <div class="form-row">
+        <label>
+          Admin API key
+          <input id="admin-api-key" type="password" autocomplete="off" placeholder="Enter ADMIN_API_KEY" />
+        </label>
+        <button id="connect-admin" class="secondary-button" type="button">Connect</button>
+      </div>
       <div id="catalog-status" class="status" role="status" aria-live="polite"></div>
 
-      <div class="catalog-grid">
-        <form id="merchant-form" class="catalog-form">
+      <fieldset id="catalog-controls" disabled>
+        <div class="catalog-grid">
+          <form id="merchant-form" class="catalog-form">
           <h2>Add merchant</h2>
           <label>
             Merchant name
             <input id="merchant-name" name="merchantName" type="text" required maxlength="120" />
           </label>
           <button type="submit">Add merchant</button>
-        </form>
+          </form>
 
-        <form id="reward-rule-form" class="catalog-form">
+          <form id="reward-rule-form" class="catalog-form">
           <h2>Add reward rule</h2>
           <label>
             Merchant
@@ -77,13 +81,14 @@
             <textarea id="promotion-note" name="promotionNote" rows="2" maxlength="500"></textarea>
           </label>
           <button type="submit">Add reward rule</button>
-        </form>
-      </div>
+          </form>
+        </div>
 
-      <section class="rules-section">
-        <h2>Reward rules</h2>
-        <div id="reward-rules" class="table-wrapper"></div>
-      </section>
+        <section class="rules-section">
+          <h2>Reward rules</h2>
+          <div id="reward-rules" class="table-wrapper"></div>
+        </section>
+      </fieldset>
     </main>
 
     <script src="admin.js"></script>
