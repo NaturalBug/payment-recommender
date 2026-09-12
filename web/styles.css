@@ -6,7 +6,7 @@ body {
 }
 
 .container {
-  max-width: 720px;
+  max-width: 880px;
   margin: 0 auto;
   background: white;
   border-radius: 16px;
@@ -14,15 +14,24 @@ body {
   padding: 24px;
 }
 
-.panel {
-  border-top: 1px solid #e6edf4;
-  margin-top: 24px;
-  padding-top: 24px;
+.site-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 28px;
 }
 
-.panel h2,
-.panel h3 {
-  margin-top: 0;
+.site-nav a {
+  border-radius: 8px;
+  color: #667085;
+  font-weight: 700;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+
+.site-nav a.active,
+.site-nav a:hover {
+  background: #eef5fc;
+  color: #1976d2;
 }
 
 .section-heading {
@@ -108,7 +117,9 @@ button {
 }
 
 .rules-section {
-  margin-top: 24px;
+  border-top: 1px solid #e6edf4;
+  margin-top: 28px;
+  padding-top: 24px;
 }
 
 .table-wrapper {
