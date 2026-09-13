@@ -47,6 +47,15 @@ npm run db:seed
 ```
 
 Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the database file in `api/prisma/` and do not commit it; it is already ignored by git.
+The catalog schema is intentionally not backward-compatible while the project
+is in its early stages. After pulling a schema update, reset and reinitialize
+the local database:
+
+```bash
+rm -f prisma/dev.db
+npx prisma db push
+npm run db:seed
+```
 
 Set `ADMIN_API_KEY` in `api/.env` before using the Admin Catalog page. The key
 must be sent in the `X-Admin-API-Key` header for every `/api/admin/*` request.
@@ -79,6 +88,24 @@ The backend now includes a lightweight admin catalog for merchants and reward ru
 
 All Admin API endpoints require `X-Admin-API-Key`. Requests without a key
 return `401`; requests with an incorrect key return `403`.
+
+### Catalog management
+
+The public recommendation page loads merchants from `GET /api/merchants`
+without an Admin API key. Administrators can use the protected catalog
+endpoints to manage merchants, payment methods, and merchant acceptance
+mappings:
+
+- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/merchants`
+- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/payment-methods`
+- `GET`, `PUT`, and `DELETE` `/api/admin/merchants/:merchantId/payment-methods/:paymentMethodId`
+
+Configure a merchant in this order: create the merchant, create or choose a
+payment method, add its acceptance mapping, then create its reward rule.
+Reward-rule requests use the numeric payment-method ID returned by the payment
+method catalog.
+Merchant, payment-method, and acceptance deletion returns `409 Conflict` while
+dependent acceptance mappings or reward rules exist.
 
 ## Continuous integration
 

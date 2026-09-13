@@ -65,6 +65,12 @@ form {
   grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
 }
 
+.forms-column {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+}
+
 .catalog-form {
   border: 1px solid #e6edf4;
   border-radius: 12px;
@@ -135,6 +141,40 @@ button {
   border-top: 1px solid #e6edf4;
   margin-top: 28px;
   padding-top: 24px;
+}
+
+.management-section,
+.acceptance-section {
+  border-top: 1px solid #e6edf4;
+  margin-top: 28px;
+  padding-top: 24px;
+}
+
+.checkbox-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 12px;
+}
+
+.checkbox-row {
+  align-items: center;
+  grid-template-columns: auto 1fr;
+  padding: 10px 12px;
+  border: 1px solid #dfe6ee;
+  border-radius: 10px;
+}
+
+.checkbox-row input {
+  margin: 0;
+  padding: 0;
+  width: auto;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 fieldset {

@@ -1,6 +1,17 @@
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
-import { createMerchant, listMerchants } from '../repositories/merchantRepository';
+import { createMerchant, deleteMerchant, listMerchants, updateMerchant } from '../repositories/merchantRepository';
+import {
+  addAcceptance,
+  removeAcceptance
+} from '../repositories/merchantPaymentAcceptanceRepository';
+import {
+  createPaymentMethod,
+  deletePaymentMethod,
+  updatePaymentMethod
+} from '../repositories/paymentMethodRepository';
 import { createRewardRule, deleteRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
+import { RepositoryConflictError } from '../repositories/errors';
 
 describe('repository layer', () => {
   beforeEach(async () => {
@@ -24,8 +35,9 @@ describe('repository layer', () => {
   test('creates and reads persisted reward rules with payment method names', async () => {
     const merchant = await createMerchant('Rule Mart', 'Rule Mart');
     const paymentMethod = await prisma.paymentMethod.create({
-      data: { name: 'Test Visa', type: 'credit_card' }
+      data: { name: 'Test Visa', normalizedName: 'testvisa', type: 'credit_card' }
     });
+    await addAcceptance(merchant.id, paymentMethod.id);
     const rule = await createRewardRule({
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
@@ -59,6 +71,134 @@ describe('repository layer', () => {
 
   test('returns false when deleting a missing reward rule', async () => {
     await expect(deleteRewardRule(999999)).resolves.toBe(false);
+  });
+
+  test('updates a merchant and rejects deletion while it has an acceptance', async () => {
+    const merchant = await createMerchant('Old Mart');
+    const method = await createPaymentMethod({ name: 'Test Pay', type: 'mobile_payment' });
+    await addAcceptance(merchant.id, method.id);
+
+    await expect(updateMerchant(merchant.id, 'New Mart')).resolves.toMatchObject({ name: 'New Mart' });
+    await expect(deleteMerchant(merchant.id)).rejects.toThrow('accepted payment methods');
+  });
+
+  test('updates a payment method and rejects deletion while it is accepted', async () => {
+    const merchant = await createMerchant('Test Mart');
+    const method = await createPaymentMethod({ name: 'Old Pay', type: 'credit_card' });
+    await addAcceptance(merchant.id, method.id);
+
+    await expect(updatePaymentMethod(method.id, { name: 'New Pay', type: 'mobile_payment' }))
+      .resolves.toMatchObject({ name: 'New Pay', type: 'mobile_payment' });
+    await expect(deletePaymentMethod(method.id)).rejects.toThrow('accepted by merchants');
+  });
+
+  test('rejects creating a payment method with an existing normalized key', async () => {
+    const paymentMethod = await createPaymentMethod({ name: 'Line Pay', type: 'mobile_payment' });
+
+    await expect(
+      createPaymentMethod({ name: 'line-pay', type: 'mobile_payment' })
+    ).rejects.toThrow('payment method already exists');
+    await expect(
+      prisma.paymentMethod.findUniqueOrThrow({ where: { id: paymentMethod.id } })
+    ).resolves.toMatchObject({ normalizedName: 'linepay' });
+  });
+
+  test('rejects updating a payment method to another method normalized key', async () => {
+    const firstMethod = await createPaymentMethod({ name: 'Line Pay', type: 'mobile_payment' });
+    const secondMethod = await createPaymentMethod({ name: 'JKO Pay', type: 'mobile_payment' });
+
+    await expect(
+      updatePaymentMethod(secondMethod.id, { name: 'line-pay', type: 'mobile_payment' })
+    ).rejects.toThrow('payment method already exists');
+    await expect(updatePaymentMethod(firstMethod.id, { name: 'line-pay', type: 'mobile_payment' }))
+      .resolves.toMatchObject({ name: 'line-pay' });
+  });
+
+  test('allows only one concurrent create for a normalized payment method name', async () => {
+    const results = await Promise.allSettled([
+      createPaymentMethod({ name: 'Concurrent Pay', type: 'mobile_payment' }),
+      createPaymentMethod({ name: 'concurrent-pay', type: 'mobile_payment' })
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    await expect(
+      prisma.paymentMethod.count({ where: { normalizedName: 'concurrentpay' } })
+    ).resolves.toBe(1);
+  });
+
+  test('rejects removing an acceptance that has a reward rule', async () => {
+    const merchant = await createMerchant('Reward Mart');
+    const method = await createPaymentMethod({ name: 'Reward Pay', type: 'credit_card' });
+    await addAcceptance(merchant.id, method.id);
+    await createRewardRule({
+      merchantId: merchant.id,
+      paymentMethodId: method.id,
+      cashbackRate: 0.01,
+      amountThreshold: 0,
+      validityStart: new Date('2026-09-01'),
+      validityEnd: new Date('2026-09-30')
+    });
+
+    await expect(removeAcceptance(merchant.id, method.id)).rejects.toThrow('reward rules');
+  });
+
+  test('returns false when removing a missing acceptance', async () => {
+    const merchant = await createMerchant('Orphaned Reward Mart');
+    const method = await createPaymentMethod({ name: 'Orphaned Reward Pay', type: 'credit_card' });
+
+    await expect(removeAcceptance(merchant.id, method.id)).resolves.toBe(false);
+  });
+
+  test('rejects creating a reward rule without an acceptance', async () => {
+    const merchant = await createMerchant('Unaccepted Reward Mart');
+    const method = await createPaymentMethod({ name: 'Unaccepted Reward Pay', type: 'credit_card' });
+
+    await expect(
+      createRewardRule({
+        merchantId: merchant.id,
+        paymentMethodId: method.id,
+        cashbackRate: 0.01,
+        amountThreshold: 0,
+        validityStart: new Date('2026-09-01'),
+        validityEnd: new Date('2026-09-30')
+      })
+    ).rejects.toThrow('payment method is not accepted by this merchant');
+  });
+
+  test('maps a foreign-key error while deleting a merchant to a conflict', async () => {
+    const merchant = await createMerchant('Concurrent Merchant');
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    jest.spyOn(prisma.merchant, 'delete').mockRejectedValueOnce(foreignKeyError);
+
+    await expect(deleteMerchant(merchant.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
+  test('maps a foreign-key error while deleting a payment method to a conflict', async () => {
+    const method = await createPaymentMethod({ name: 'Concurrent Method', type: 'credit_card' });
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    jest.spyOn(prisma.paymentMethod, 'delete').mockRejectedValueOnce(foreignKeyError);
+
+    await expect(deletePaymentMethod(method.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
+  test('maps a foreign-key error while deleting an acceptance to a conflict', async () => {
+    const merchant = await createMerchant('Concurrent Acceptance Merchant');
+    const method = await createPaymentMethod({ name: 'Concurrent Acceptance Method', type: 'credit_card' });
+    await addAcceptance(merchant.id, method.id);
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    jest.spyOn(prisma.merchantPaymentAcceptance, 'delete').mockRejectedValueOnce(foreignKeyError);
+
+    await expect(removeAcceptance(merchant.id, method.id)).rejects.toBeInstanceOf(RepositoryConflictError);
   });
 
   test('rethrows unexpected delete errors', async () => {

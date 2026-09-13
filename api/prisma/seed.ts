@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { normalizeMerchantName } from '../src/lib/normalization';
+import { normalizeMerchantName, normalizePaymentMethodKey } from '../src/lib/normalization';
 import { getDatabaseUrl } from '../src/config/env';
 
 export const merchants = [
@@ -43,7 +43,7 @@ export async function seedDatabase(prisma: PrismaClient) {
   for (const merchant of merchants) {
     await prisma.merchant.upsert({
       where: { name: merchant.name },
-      update: { normalizedName: normalizeMerchantName(merchant.name) },
+      update: {},
       create: {
         name: merchant.name,
         normalizedName: normalizeMerchantName(merchant.name),
@@ -56,16 +56,26 @@ export async function seedDatabase(prisma: PrismaClient) {
     await prisma.paymentMethod.upsert({
       where: { name: method.name },
       update: {},
-      create: { name: method.name, type: method.type }
+      create: {
+        name: method.name,
+        normalizedName: normalizePaymentMethodKey(method.name),
+        type: method.type
+      }
     });
   }
 
   for (const acceptance of merchantPaymentAcceptances) {
+    const merchantSeed = merchants.find((item) => item.name === acceptance.merchantName);
+    const paymentMethodSeed = paymentMethods.find((item) => item.name === acceptance.paymentMethodName);
+    if (!merchantSeed || !paymentMethodSeed) {
+      throw new Error('seed acceptance references an unknown catalog record');
+    }
+
     const merchant = await prisma.merchant.findUniqueOrThrow({
-      where: { name: acceptance.merchantName }
+      where: { name: merchantSeed.name }
     });
     const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({
-      where: { name: acceptance.paymentMethodName }
+      where: { name: paymentMethodSeed.name }
     });
 
     await prisma.merchantPaymentAcceptance.upsert({
@@ -84,11 +94,17 @@ export async function seedDatabase(prisma: PrismaClient) {
   }
 
   for (const rule of rewardRules) {
+    const merchantSeed = merchants.find((item) => item.name === rule.merchantName);
+    const paymentMethodSeed = paymentMethods.find((item) => item.name === rule.paymentMethodName);
+    if (!merchantSeed || !paymentMethodSeed) {
+      throw new Error('seed reward rule references an unknown catalog record');
+    }
+
     const merchant = await prisma.merchant.findUniqueOrThrow({
-      where: { name: rule.merchantName }
+      where: { name: merchantSeed.name }
     });
     const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({
-      where: { name: rule.paymentMethodName }
+      where: { name: paymentMethodSeed.name }
     });
 
     await prisma.rewardRule.upsert({

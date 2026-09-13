@@ -13,6 +13,17 @@ export type PaymentMethodRecord = {
   type: string;
 };
 
+export type PaymentMethodInput = {
+  name: string;
+  type: string;
+};
+
+export type MerchantPaymentAcceptanceRecord = {
+  merchantId: number;
+  paymentMethodId: number;
+  paymentMethod: PaymentMethodRecord;
+};
+
 export type RewardRuleRecord = {
   id: number;
   merchantId: number;

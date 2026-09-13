@@ -63,19 +63,18 @@ export async function createRewardRule(input: {
 }): Promise<RewardRuleRecord> {
   try {
     const rule = await prisma.$transaction(async (transaction) => {
-      await transaction.merchantPaymentAcceptance.upsert({
+      const acceptance = await transaction.merchantPaymentAcceptance.findUnique({
         where: {
           merchantId_paymentMethodId: {
             merchantId: input.merchantId,
             paymentMethodId: input.paymentMethodId
           }
-        },
-        update: {},
-        create: {
-          merchantId: input.merchantId,
-          paymentMethodId: input.paymentMethodId
         }
       });
+
+      if (!acceptance) {
+        throw new RepositoryValidationError('payment method is not accepted by this merchant');
+      }
 
       return transaction.rewardRule.create({
         data: {

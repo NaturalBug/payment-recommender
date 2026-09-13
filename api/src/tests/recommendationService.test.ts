@@ -10,11 +10,11 @@ describe('getRecommendations', () => {
 
     await prisma.paymentMethod.createMany({
       data: [
-        { name: 'VISA', type: 'credit_card' },
-        { name: 'AMEX Gold', type: 'credit_card' },
-        { name: 'LINE Pay', type: 'mobile_payment' },
-        { name: 'JKO Pay', type: 'mobile_payment' },
-        { name: 'Cash', type: 'debit_card' }
+        { name: 'VISA', normalizedName: 'visa', type: 'credit_card' },
+        { name: 'AMEX Gold', normalizedName: 'amexgold', type: 'credit_card' },
+        { name: 'LINE Pay', normalizedName: 'linepay', type: 'mobile_payment' },
+        { name: 'JKO Pay', normalizedName: 'jkopay', type: 'mobile_payment' },
+        { name: 'Cash', normalizedName: 'cash', type: 'debit_card' }
       ]
     });
 
@@ -174,20 +174,12 @@ describe('getRecommendations', () => {
     expect(results[0].paymentMethod).toBe('VISA');
   });
 
-  test('filters out reward rules for payment methods the merchant does not accept', async () => {
+  test('omits an accepted payment method without a reward rule', async () => {
     const familyMart = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
-    const amex = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
+    const cash = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'Cash' } });
 
-    await prisma.rewardRule.create({
-      data: {
-        merchantId: familyMart.id,
-        paymentMethodId: amex.id,
-        cashbackRate: 0.05,
-        amountThreshold: 0,
-        validityStart: new Date('2026-01-01T00:00:00.000Z'),
-        validityEnd: new Date('2026-12-31T23:59:59.999Z'),
-        promotionNote: 'Unaccepted method'
-      }
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: familyMart.id, paymentMethodId: cash.id }
     });
 
     const results = await getRecommendations({

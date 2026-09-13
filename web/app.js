@@ -12,8 +12,17 @@ const DEFAULT_OPTIONS = {
 
 dateInput.value = DEFAULT_OPTIONS.date;
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
 async function fetchMerchants() {
-  const response = await fetch(`${apiBaseUrl}/api/admin/merchants`);
+  const response = await fetch(`${apiBaseUrl}/api/merchants`);
   if (!response.ok) {
     throw new Error('merchant catalog unavailable');
   }
@@ -26,14 +35,14 @@ async function populateMerchantOptions() {
   try {
     const merchants = await fetchMerchants();
     merchantSelect.innerHTML = merchants.length
-      ? merchants.map((merchant) => `<option value="${merchant}">${merchant}</option>`).join('')
+      ? merchants.map((merchant) => `<option value="${escapeHtml(merchant.name)}">${escapeHtml(merchant.name)}</option>`).join('')
       : '<option value="">No merchants available</option>';
 
-    if (merchants.includes(DEFAULT_OPTIONS.merchantName)) {
+    if (merchants.some((merchant) => merchant.name === DEFAULT_OPTIONS.merchantName)) {
       merchantSelect.value = DEFAULT_OPTIONS.merchantName;
     }
   } catch (error) {
-    merchantSelect.innerHTML = `<option value="${DEFAULT_OPTIONS.merchantName}">${DEFAULT_OPTIONS.merchantName}</option>`;
+    merchantSelect.innerHTML = `<option value="${escapeHtml(DEFAULT_OPTIONS.merchantName)}">${escapeHtml(DEFAULT_OPTIONS.merchantName)}</option>`;
   }
 }
 
@@ -73,10 +82,10 @@ form.addEventListener('submit', async (event) => {
     results.innerHTML = recommendations
       .map((item) => `
         <article class="result-item">
-          <h3>${item.paymentMethod}</h3>
+          <h3>${escapeHtml(item.paymentMethod)}</h3>
           <p>Cashback rate: ${(item.cashbackRate * 100).toFixed(2)}%</p>
           <p>Estimated cashback: NT$ ${Number(item.estimatedCashback).toFixed(2)}</p>
-          <p>${item.promotionNote || 'No promotion note'}</p>
+          <p>${escapeHtml(item.promotionNote || 'No promotion note')}</p>
         </article>
       `)
       .join('');

@@ -2,7 +2,9 @@ import request from 'supertest';
 import app from '../app';
 import prisma from '../lib/prisma';
 import * as merchantRepository from '../repositories/merchantRepository';
+import * as paymentMethodRepository from '../repositories/paymentMethodRepository';
 import * as rewardRuleRepository from '../repositories/rewardRuleRepository';
+import { RepositoryConflictError } from '../repositories/errors';
 
 describe('admin routes', () => {
   beforeEach(async () => {
@@ -13,11 +15,11 @@ describe('admin routes', () => {
 
     await prisma.paymentMethod.createMany({
       data: [
-        { name: 'VISA', type: 'credit_card' },
-        { name: 'AMEX Gold', type: 'credit_card' },
-        { name: 'LINE Pay', type: 'mobile_payment' },
-        { name: 'JKO Pay', type: 'mobile_payment' },
-        { name: 'Cash', type: 'debit_card' }
+        { name: 'VISA', normalizedName: 'visa', type: 'credit_card' },
+        { name: 'AMEX Gold', normalizedName: 'amexgold', type: 'credit_card' },
+        { name: 'LINE Pay', normalizedName: 'linepay', type: 'mobile_payment' },
+        { name: 'JKO Pay', normalizedName: 'jkopay', type: 'mobile_payment' },
+        { name: 'Cash', normalizedName: 'cash', type: 'debit_card' }
       ]
     });
 
@@ -45,7 +47,9 @@ describe('admin routes', () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(Array.isArray(response.body.data)).toBe(true);
-    expect(response.body.data).toContain('FamilyMart');
+    expect(response.body.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'FamilyMart' })])
+    );
   });
 
   test('creates a new merchant', async () => {
@@ -56,7 +60,8 @@ describe('admin routes', () => {
 
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
-    expect(response.body.data.merchantName).toBe('MomoMart');
+    expect(response.body.data).toMatchObject({ name: 'MomoMart' });
+    expect(typeof response.body.data.id).toBe('number');
   });
 
   test('returns a conflict for a duplicate merchant POST', async () => {
@@ -107,12 +112,18 @@ describe('admin routes', () => {
   });
 
   test('creates a reward rule for a merchant', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: merchant.id, paymentMethodId: method.id }
+    });
+
     const response = await request(app)
       .post('/api/admin/reward-rules')
       .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
-        paymentMethodId: 'visa',
+        paymentMethodId: method.id,
         cashbackRate: 0.05,
         amountThreshold: 200,
         validityStart: '2026-09-01',
@@ -123,13 +134,14 @@ describe('admin routes', () => {
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
     expect(response.body.data.merchantName).toBe('FamilyMart');
+    expect(response.body.data.paymentMethodId).toBe(method.id);
     expect(response.body.data.cashbackRate).toBe(0.05);
     await expect(
       prisma.merchantPaymentAcceptance.findUnique({
         where: {
           merchantId_paymentMethodId: {
-            merchantId: (await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } })).id,
-            paymentMethodId: (await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } })).id
+            merchantId: merchant.id,
+            paymentMethodId: method.id
           }
         }
       })
@@ -137,6 +149,7 @@ describe('admin routes', () => {
   });
 
   test('surfaces unexpected reward-rule write errors as server errors', async () => {
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
     jest.spyOn(rewardRuleRepository, 'createRewardRule').mockRejectedValueOnce(new Error('database unavailable'));
 
     const response = await request(app)
@@ -144,7 +157,7 @@ describe('admin routes', () => {
       .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
-        paymentMethodId: 'visa',
+        paymentMethodId: method.id,
         cashbackRate: 0.05,
         amountThreshold: 200,
         validityStart: '2026-09-01',
@@ -156,27 +169,251 @@ describe('admin routes', () => {
     expect(response.body.message).toBe('database unavailable');
   });
 
-  test('does not recommend a reward rule for an unaccepted payment method', async () => {
-    const familyMart = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
-    const amex = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
+  test('rejects a reward rule for an unaccepted payment method', async () => {
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
 
-    await prisma.rewardRule.create({
-      data: {
-        merchantId: familyMart.id,
-        paymentMethodId: amex.id,
+    const response = await request(app)
+      .post('/api/admin/reward-rules')
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantName: 'FamilyMart',
+        paymentMethodId: method.id,
         cashbackRate: 0.05,
         amountThreshold: 0,
-        validityStart: new Date('2026-09-01T00:00:00.000Z'),
-        validityEnd: new Date('2026-09-30T23:59:59.999Z'),
-        promotionNote: 'Unaccepted method'
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      });
+
+    expect(response).toMatchObject({
+      status: 400,
+      body: {
+        success: false,
+        message: 'payment method is not accepted by this merchant'
+      }
+    });
+  });
+
+  test('lists public merchants without an admin API key', async () => {
+    const response = await request(app).get('/api/merchants');
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'FamilyMart' })])
+    );
+  });
+
+  test('manages a payment method and merchant acceptance', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const method = await request(app).post('/api/admin/payment-methods').set(key)
+      .send({ name: 'Taiwan Pay', type: 'mobile_payment' });
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+
+    const acceptance = await request(app).put(`/api/admin/merchants/${merchant.id}/payment-methods/${method.body.data.id}`).set(key);
+    expect(acceptance.status).toBe(201);
+    await expect(request(app).delete(`/api/admin/merchants/${merchant.id}`).set(key))
+      .resolves.toMatchObject({ status: 409 });
+  });
+
+  test('rejects duplicate payment method names and incomplete requests', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+
+    const duplicate = await request(app)
+      .post('/api/admin/payment-methods')
+      .set(key)
+      .send({ name: 'visa', type: 'credit_card' });
+    const incomplete = await request(app)
+      .post('/api/admin/payment-methods')
+      .set(key)
+      .send({ name: 'New Pay' });
+
+    expect(duplicate).toMatchObject({
+      status: 409,
+      body: { success: false, message: 'payment method already exists' }
+    });
+    expect(incomplete).toMatchObject({
+      status: 400,
+      body: { success: false, message: 'name and type are required' }
+    });
+  });
+
+  test('rejects removal of an accepted payment method with reward rules', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await prisma.merchantPaymentAcceptance.create({ data: { merchantId: merchant.id, paymentMethodId: method.id } });
+    await prisma.rewardRule.create({
+      data: {
+        merchantId: merchant.id, paymentMethodId: method.id, cashbackRate: 0.01, amountThreshold: 0,
+        validityStart: new Date('2026-09-01'), validityEnd: new Date('2026-09-30')
       }
     });
 
     const response = await request(app)
-      .get('/api/recommendations')
-      .query({ merchant_name: 'FamilyMart', amount: 500, date: '2026-09-15' });
+      .delete(`/api/admin/merchants/${merchant.id}/payment-methods/${method.id}`).set(key);
+    expect(response).toMatchObject({
+      status: 409,
+      body: { success: false, message: 'acceptance has reward rules' }
+    });
+  });
 
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, data: [] });
+  test('returns not found when removing a missing acceptance', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+    const response = await request(app)
+      .delete(`/api/admin/merchants/${merchant.id}/payment-methods/${method.id}`)
+      .set(key);
+
+    expect(response).toMatchObject({
+      status: 404,
+      body: { success: false, message: 'acceptance not found' }
+    });
+  });
+
+  test('manages payment methods via CRUD endpoints', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+
+    // List
+    const listRes = await request(app).get('/api/admin/payment-methods').set(key);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.success).toBe(true);
+    expect(listRes.body.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'VISA' })])
+    );
+
+    // Create
+    const createRes = await request(app).post('/api/admin/payment-methods').set(key)
+      .send({ name: 'EasyCard', type: 'transit_card' });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.data).toMatchObject({ name: 'EasyCard', type: 'transit_card' });
+    const createdId = createRes.body.data.id;
+
+    // Update
+    const patchRes = await request(app).patch(`/api/admin/payment-methods/${createdId}`).set(key)
+      .send({ name: 'EasyCard 2.0', type: 'contactless' });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.body.data).toMatchObject({ id: createdId, name: 'EasyCard 2.0', type: 'contactless' });
+
+    // Delete
+    const deleteRes = await request(app).delete(`/api/admin/payment-methods/${createdId}`).set(key);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body).toEqual({ success: true, data: { deleted: true } });
+
+    // 404 for deleted
+    const deleteNotFound = await request(app).delete(`/api/admin/payment-methods/${createdId}`).set(key);
+    expect(deleteNotFound.status).toBe(404);
+  });
+
+  test('maps payment method update conflicts and delete failures', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    jest.spyOn(paymentMethodRepository, 'updatePaymentMethod')
+      .mockRejectedValueOnce(new RepositoryConflictError('payment method already exists'));
+    jest.spyOn(paymentMethodRepository, 'deletePaymentMethod')
+      .mockRejectedValueOnce(new Error('database unavailable'));
+
+    const conflict = await request(app)
+      .patch(`/api/admin/payment-methods/${method.id}`)
+      .set(key)
+      .send({ name: 'Renamed VISA' });
+    const failure = await request(app)
+      .delete(`/api/admin/payment-methods/${method.id}`)
+      .set(key);
+
+    expect(conflict).toMatchObject({
+      status: 409,
+      body: { success: false, message: 'payment method already exists' }
+    });
+    expect(failure).toMatchObject({
+      status: 500,
+      body: { success: false, message: 'database unavailable' }
+    });
+  });
+
+  test('manages merchant updates, acceptances, and deletion', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const createRes = await request(app).post('/api/admin/merchants').set(key)
+      .send({ merchantName: 'Temp Mart' });
+    expect(createRes.status).toBe(201);
+    const merchantId = createRes.body.data.id;
+
+    // Update merchant
+    const updateRes = await request(app).patch(`/api/admin/merchants/${merchantId}`).set(key)
+      .send({ merchantName: 'Temp Mart Updated' });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.data.name).toBe('Temp Mart Updated');
+
+    // Add acceptance
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const putAcc = await request(app).put(`/api/admin/merchants/${merchantId}/payment-methods/${visa.id}`).set(key);
+    expect(putAcc.status).toBe(201);
+
+    // List acceptances
+    const listAcc = await request(app).get(`/api/admin/merchants/${merchantId}/payment-methods`).set(key);
+    expect(listAcc.status).toBe(200);
+    expect(listAcc.body.data).toEqual([expect.objectContaining({ id: visa.id, name: 'VISA' })]);
+
+    // Delete acceptance
+    const delAcc = await request(app).delete(`/api/admin/merchants/${merchantId}/payment-methods/${visa.id}`).set(key);
+    expect(delAcc.status).toBe(200);
+    expect(delAcc.body).toEqual({ success: true, data: { deleted: true } });
+
+    // Delete merchant
+    const delMerchant = await request(app).delete(`/api/admin/merchants/${merchantId}`).set(key);
+    expect(delMerchant.status).toBe(200);
+    expect(delMerchant.body).toEqual({ success: true, data: { deleted: true } });
+  });
+
+  test('recommends a newly managed catalog payment method', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await request(app)
+      .post('/api/admin/merchants')
+      .set(key)
+      .send({ merchantName: 'Catalog Mart' });
+    const method = await request(app)
+      .post('/api/admin/payment-methods')
+      .set(key)
+      .send({ name: 'Catalog Pay', type: 'mobile_payment' });
+
+    await request(app)
+      .put(`/api/admin/merchants/${merchant.body.data.id}/payment-methods/${method.body.data.id}`)
+      .set(key);
+    await request(app)
+      .post('/api/admin/reward-rules')
+      .set(key)
+      .send({
+        merchantName: 'Catalog Mart',
+        paymentMethodId: String(method.body.data.id),
+        cashbackRate: 0.06,
+        amountThreshold: 0,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      });
+
+    const recommendation = await request(app)
+      .get('/api/recommendations')
+      .query({ merchant_name: 'Catalog Mart', amount: 500, date: '2026-09-15' });
+
+    expect(recommendation.status).toBe(200);
+    expect(recommendation.body.data[0]).toMatchObject({
+      paymentMethod: 'Catalog Pay',
+      cashbackRate: 0.06
+    });
+  });
+
+  test('validates IDs and returns 404 for invalid or missing IDs', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    await expect(request(app).get('/api/admin/merchants/invalid/payment-methods').set(key))
+      .resolves.toMatchObject({ status: 404 });
+    await expect(request(app).patch('/api/admin/merchants/-1').set(key).send({ merchantName: 'Bad' }))
+      .resolves.toMatchObject({ status: 404 });
+    await expect(request(app).patch('/api/admin/merchants/999999').set(key).send({ merchantName: 'Bad' }))
+      .resolves.toMatchObject({ status: 404 });
+    await expect(request(app).delete('/api/admin/merchants/0').set(key))
+      .resolves.toMatchObject({ status: 404 });
+    await expect(request(app).patch('/api/admin/payment-methods/invalid').set(key).send({ name: 'Bad' }))
+      .resolves.toMatchObject({ status: 404 });
+    await expect(request(app).delete('/api/admin/payment-methods/999999').set(key))
+      .resolves.toMatchObject({ status: 404 });
   });
 });
