@@ -2,13 +2,14 @@ import express from 'express';
 import prisma from './lib/prisma';
 import { requireAdminApiKey } from './middleware/adminAuth';
 import adminRouter from './routes/admin';
+import merchantsRouter from './routes/merchants';
 import recommendationsRouter from './routes/recommendations';
 
 const app = express();
 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, X-Admin-API-Key');
 
   if (req.method === 'OPTIONS') {
@@ -35,6 +36,7 @@ app.get('/health', async (_req, res) => {
   }
 });
 
+app.use('/api/merchants', merchantsRouter);
 app.use('/api/admin', requireAdminApiKey, adminRouter);
 app.use('/api/recommendations', recommendationsRouter);
 
