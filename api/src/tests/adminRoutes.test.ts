@@ -297,6 +297,43 @@ describe('admin routes', () => {
     expect(delMerchant.body).toEqual({ success: true, data: { deleted: true } });
   });
 
+  test('recommends a newly managed catalog payment method', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await request(app)
+      .post('/api/admin/merchants')
+      .set(key)
+      .send({ merchantName: 'Catalog Mart' });
+    const method = await request(app)
+      .post('/api/admin/payment-methods')
+      .set(key)
+      .send({ name: 'Catalog Pay', type: 'mobile_payment' });
+
+    await request(app)
+      .put(`/api/admin/merchants/${merchant.body.data.id}/payment-methods/${method.body.data.id}`)
+      .set(key);
+    await request(app)
+      .post('/api/admin/reward-rules')
+      .set(key)
+      .send({
+        merchantName: 'Catalog Mart',
+        paymentMethodId: String(method.body.data.id),
+        cashbackRate: 0.06,
+        amountThreshold: 0,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      });
+
+    const recommendation = await request(app)
+      .get('/api/recommendations')
+      .query({ merchant_name: 'Catalog Mart', amount: 500, date: '2026-09-15' });
+
+    expect(recommendation.status).toBe(200);
+    expect(recommendation.body.data[0]).toMatchObject({
+      paymentMethod: 'Catalog Pay',
+      cashbackRate: 0.06
+    });
+  });
+
   test('validates IDs and returns 404 for invalid or missing IDs', async () => {
     const key = { 'X-Admin-API-Key': 'test-admin-key' };
     await expect(request(app).get('/api/admin/merchants/invalid/payment-methods').set(key))

@@ -14,7 +14,7 @@
       </nav>
 
       <p class="eyebrow">Admin catalog</p>
-      <h1>Manage merchants and reward rules</h1>
+      <h1>Manage merchants, payment methods, and reward rules</h1>
       <div class="section-heading">
         <p class="muted">Maintain the catalog used by the recommendation page.</p>
         <button id="refresh-catalog" class="secondary-button" type="button">Refresh</button>
@@ -31,14 +31,29 @@
 
       <fieldset id="catalog-controls" disabled>
         <div class="catalog-grid">
-          <form id="merchant-form" class="catalog-form merchant-form">
-            <h2>Add merchant</h2>
-            <label>
-              Merchant name
-              <input id="merchant-name" name="merchantName" type="text" required maxlength="120" />
-            </label>
-            <button type="submit">Add merchant</button>
-          </form>
+          <div class="forms-column">
+            <form id="merchant-form" class="catalog-form merchant-form">
+              <h2>Add merchant</h2>
+              <label>
+                Merchant name
+                <input id="merchant-name" name="merchantName" type="text" required maxlength="120" />
+              </label>
+              <button type="submit">Add merchant</button>
+            </form>
+
+            <form id="payment-method-form" class="catalog-form">
+              <h2>Add payment method</h2>
+              <label>
+                Payment method name
+                <input id="payment-method-name" name="name" type="text" required maxlength="120" />
+              </label>
+              <label>
+                Payment method type
+                <input id="payment-method-type" name="type" type="text" required maxlength="60" />
+              </label>
+              <button type="submit">Add payment method</button>
+            </form>
+          </div>
 
           <form id="reward-rule-form" class="catalog-form">
             <h2>Add reward rule</h2>
@@ -48,13 +63,7 @@
             </label>
             <label>
               Payment method
-              <select id="payment-method" name="paymentMethodId" required>
-                <option value="visa">VISA</option>
-                <option value="amex">AMEX Gold</option>
-                <option value="linepay">LINE Pay</option>
-                <option value="jko">JKO Pay</option>
-                <option value="cash">Cash</option>
-              </select>
+              <select id="payment-method" name="paymentMethodId" required></select>
             </label>
             <div class="form-row numeric-fields">
               <label>
@@ -83,6 +92,25 @@
             <button type="submit">Add reward rule</button>
           </form>
         </div>
+
+        <section class="acceptance-section">
+          <h2>Accepted payment methods</h2>
+          <label>
+            Merchant
+            <select id="acceptance-merchant" name="merchantId"></select>
+          </label>
+          <div id="accepted-payment-methods" class="checkbox-grid"></div>
+        </section>
+
+        <section class="management-section">
+          <h2>Merchants</h2>
+          <div id="merchants" class="table-wrapper"></div>
+        </section>
+
+        <section class="management-section">
+          <h2>Payment methods</h2>
+          <div id="payment-methods" class="table-wrapper"></div>
+        </section>
 
         <section class="rules-section">
           <h2>Reward rules</h2>

@@ -80,6 +80,22 @@ The backend now includes a lightweight admin catalog for merchants and reward ru
 All Admin API endpoints require `X-Admin-API-Key`. Requests without a key
 return `401`; requests with an incorrect key return `403`.
 
+### Catalog management
+
+The public recommendation page loads merchants from `GET /api/merchants`
+without an Admin API key. Administrators can use the protected catalog
+endpoints to manage merchants, payment methods, and merchant acceptance
+mappings:
+
+- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/merchants`
+- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/payment-methods`
+- `GET`, `PUT`, and `DELETE` `/api/admin/merchants/:merchantId/payment-methods/:paymentMethodId`
+
+Configure a merchant in this order: create the merchant, create or choose a
+payment method, add its acceptance mapping, then create its reward rule.
+Merchant, payment-method, and acceptance deletion returns `409 Conflict` while
+dependent acceptance mappings or reward rules exist.
+
 ## Continuous integration
 
 GitHub Actions runs on pushes to the main development branches and pull

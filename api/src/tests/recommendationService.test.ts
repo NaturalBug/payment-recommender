@@ -198,4 +198,21 @@ describe('getRecommendations', () => {
 
     expect(results.map((result) => result.paymentMethod)).toEqual(['LINE Pay', 'VISA']);
   });
+
+  test('omits an accepted payment method without a reward rule', async () => {
+    const familyMart = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const cash = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'Cash' } });
+
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: familyMart.id, paymentMethodId: cash.id }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: 'FamilyMart',
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results.map((result) => result.paymentMethod)).toEqual(['LINE Pay', 'VISA']);
+  });
 });
