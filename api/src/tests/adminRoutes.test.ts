@@ -2,7 +2,9 @@ import request from 'supertest';
 import app from '../app';
 import prisma from '../lib/prisma';
 import * as merchantRepository from '../repositories/merchantRepository';
+import * as paymentMethodRepository from '../repositories/paymentMethodRepository';
 import * as rewardRuleRepository from '../repositories/rewardRuleRepository';
+import { RepositoryConflictError } from '../repositories/errors';
 
 describe('admin routes', () => {
   beforeEach(async () => {
@@ -308,6 +310,32 @@ describe('admin routes', () => {
     // 404 for deleted
     const deleteNotFound = await request(app).delete(`/api/admin/payment-methods/${createdId}`).set(key);
     expect(deleteNotFound.status).toBe(404);
+  });
+
+  test('maps payment method update conflicts and delete failures', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    jest.spyOn(paymentMethodRepository, 'updatePaymentMethod')
+      .mockRejectedValueOnce(new RepositoryConflictError('payment method already exists'));
+    jest.spyOn(paymentMethodRepository, 'deletePaymentMethod')
+      .mockRejectedValueOnce(new Error('database unavailable'));
+
+    const conflict = await request(app)
+      .patch(`/api/admin/payment-methods/${method.id}`)
+      .set(key)
+      .send({ name: 'Renamed VISA' });
+    const failure = await request(app)
+      .delete(`/api/admin/payment-methods/${method.id}`)
+      .set(key);
+
+    expect(conflict).toMatchObject({
+      status: 409,
+      body: { success: false, message: 'payment method already exists' }
+    });
+    expect(failure).toMatchObject({
+      status: 500,
+      body: { success: false, message: 'database unavailable' }
+    });
   });
 
   test('manages merchant updates, acceptances, and deletion', async () => {

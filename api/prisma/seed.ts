@@ -39,6 +39,29 @@ export const rewardRules = [
   { id: 8, merchantName: 'PX Mart', paymentMethodName: 'VISA', cashbackRate: 0.01, amountThreshold: 0, validityStart: '2026-01-01', validityEnd: '2026-12-31', promotionNote: '1% on general purchases' }
 ] as const;
 
+async function backfillPaymentMethodNormalizedNames(prisma: PrismaClient): Promise<void> {
+  const methods = await prisma.paymentMethod.findMany({
+    select: { id: true, name: true, normalizedName: true }
+  });
+  const methodIdByNormalizedName = new Map<string, number>();
+
+  for (const method of methods) {
+    const normalizedName = normalizePaymentMethodKey(method.name);
+    const existingMethodId = methodIdByNormalizedName.get(normalizedName);
+    if (existingMethodId !== undefined && existingMethodId !== method.id) {
+      throw new Error(`payment method normalization conflict: "${method.name}"`);
+    }
+    methodIdByNormalizedName.set(normalizedName, method.id);
+  }
+
+  await prisma.$transaction(
+    methods.map((method) => prisma.paymentMethod.update({
+      where: { id: method.id },
+      data: { normalizedName: normalizePaymentMethodKey(method.name) }
+    }))
+  );
+}
+
 export async function seedDatabase(prisma: PrismaClient) {
   for (const merchant of merchants) {
     await prisma.merchant.upsert({
@@ -63,6 +86,8 @@ export async function seedDatabase(prisma: PrismaClient) {
       }
     });
   }
+
+  await backfillPaymentMethodNormalizedNames(prisma);
 
   for (const acceptance of merchantPaymentAcceptances) {
     const merchant = await prisma.merchant.findUniqueOrThrow({

@@ -86,4 +86,47 @@ describe('data persistence', () => {
       await prisma.$disconnect();
     }
   });
+
+  test('seed backfills normalized keys for existing payment methods', async () => {
+    const prisma = new PrismaClient({
+      datasources: {
+        db: { url: testDatabaseUrl }
+      }
+    });
+
+    try {
+      const paymentMethod = await prisma.paymentMethod.create({
+        data: { name: 'Custom Pay', type: 'mobile_payment' }
+      });
+
+      await seedDatabase(prisma);
+
+      await expect(
+        prisma.paymentMethod.findUniqueOrThrow({ where: { id: paymentMethod.id } })
+      ).resolves.toMatchObject({ normalizedName: 'custompay' });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  test('seed reports existing payment methods with colliding normalized keys', async () => {
+    const prisma = new PrismaClient({
+      datasources: {
+        db: { url: testDatabaseUrl }
+      }
+    });
+
+    try {
+      await prisma.paymentMethod.createMany({
+        data: [
+          { name: 'Legacy Pay', type: 'mobile_payment' },
+          { name: 'legacy-pay', type: 'mobile_payment' }
+        ]
+      });
+
+      await expect(seedDatabase(prisma)).rejects.toThrow('payment method normalization conflict');
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
 });

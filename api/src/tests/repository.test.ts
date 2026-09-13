@@ -112,6 +112,19 @@ describe('repository layer', () => {
       .resolves.toMatchObject({ name: 'line-pay' });
   });
 
+  test('allows only one concurrent create for a normalized payment method name', async () => {
+    const results = await Promise.allSettled([
+      createPaymentMethod({ name: 'Concurrent Pay', type: 'mobile_payment' }),
+      createPaymentMethod({ name: 'concurrent-pay', type: 'mobile_payment' })
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    await expect(
+      prisma.paymentMethod.count({ where: { normalizedName: 'concurrentpay' } })
+    ).resolves.toBe(1);
+  });
+
   test('rejects removing an acceptance that has a reward rule', async () => {
     const merchant = await createMerchant('Reward Mart');
     const method = await createPaymentMethod({ name: 'Reward Pay', type: 'credit_card' });
