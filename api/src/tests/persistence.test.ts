@@ -135,6 +135,45 @@ describe('data persistence', () => {
     }
   });
 
+  test('seed backfills an acceptance mapping for a legacy orphan reward rule', async () => {
+    const prisma = new PrismaClient({
+      datasources: {
+        db: { url: testDatabaseUrl }
+      }
+    });
+
+    try {
+      const merchant = await prisma.merchant.create({
+        data: { name: 'Legacy Shop', normalizedName: 'legacy shop' }
+      });
+      const paymentMethod = await prisma.paymentMethod.create({
+        data: { name: 'Legacy Card', type: 'credit_card' }
+      });
+
+      await prisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF');
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO RewardRule (merchantId, paymentMethodId, cashbackRate, amountThreshold, validityStart, validityEnd)
+         VALUES (${merchant.id}, ${paymentMethod.id}, 0.05, 0, '2026-01-01T00:00:00.000Z', '2026-12-31T23:59:59.999Z')`
+      );
+      await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
+
+      await seedDatabase(prisma);
+
+      await expect(
+        prisma.merchantPaymentAcceptance.findUnique({
+          where: {
+            merchantId_paymentMethodId: {
+              merchantId: merchant.id,
+              paymentMethodId: paymentMethod.id
+            }
+          }
+        })
+      ).resolves.not.toBeNull();
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   test('seed preserves renamed seeded catalog records', async () => {
     const prisma = new PrismaClient({
       datasources: {

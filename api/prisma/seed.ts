@@ -89,6 +89,28 @@ async function backfillSeedKeys(prisma: PrismaClient): Promise<void> {
   ]);
 }
 
+async function backfillRewardRuleAcceptances(prisma: PrismaClient): Promise<void> {
+  const rewardRules = await prisma.rewardRule.findMany({
+    select: { merchantId: true, paymentMethodId: true }
+  });
+
+  await prisma.$transaction(
+    rewardRules.map((rule) => prisma.merchantPaymentAcceptance.upsert({
+      where: {
+        merchantId_paymentMethodId: {
+          merchantId: rule.merchantId,
+          paymentMethodId: rule.paymentMethodId
+        }
+      },
+      update: {},
+      create: {
+        merchantId: rule.merchantId,
+        paymentMethodId: rule.paymentMethodId
+      }
+    }))
+  );
+}
+
 export async function seedDatabase(prisma: PrismaClient) {
   await backfillSeedKeys(prisma);
 
@@ -120,6 +142,7 @@ export async function seedDatabase(prisma: PrismaClient) {
   }
 
   await backfillPaymentMethodNormalizedNames(prisma);
+  await backfillRewardRuleAcceptances(prisma);
 
   for (const acceptance of merchantPaymentAcceptances) {
     const merchantSeed = merchants.find((item) => item.name === acceptance.merchantName);
