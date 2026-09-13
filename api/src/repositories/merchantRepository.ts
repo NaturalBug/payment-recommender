@@ -103,8 +103,14 @@ export async function deleteMerchant(id: number): Promise<boolean> {
     await prisma.merchant.delete({ where: { id } });
     return true;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-      return false;
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2025') {
+        return false;
+      }
+
+      if (error.code === 'P2003') {
+        throw new RepositoryConflictError('merchant has dependent catalog records');
+      }
     }
 
     throw error;

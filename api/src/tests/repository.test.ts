@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { createMerchant, deleteMerchant, listMerchants, updateMerchant } from '../repositories/merchantRepository';
 import {
@@ -10,6 +11,7 @@ import {
   updatePaymentMethod
 } from '../repositories/paymentMethodRepository';
 import { createRewardRule, deleteRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
+import { RepositoryConflictError } from '../repositories/errors';
 
 describe('repository layer', () => {
   beforeEach(async () => {
@@ -162,6 +164,41 @@ describe('repository layer', () => {
         validityEnd: new Date('2026-09-30')
       })
     ).rejects.toThrow('payment method is not accepted by this merchant');
+  });
+
+  test('maps a foreign-key error while deleting a merchant to a conflict', async () => {
+    const merchant = await createMerchant('Concurrent Merchant');
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    jest.spyOn(prisma.merchant, 'delete').mockRejectedValueOnce(foreignKeyError);
+
+    await expect(deleteMerchant(merchant.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
+  test('maps a foreign-key error while deleting a payment method to a conflict', async () => {
+    const method = await createPaymentMethod({ name: 'Concurrent Method', type: 'credit_card' });
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    jest.spyOn(prisma.paymentMethod, 'delete').mockRejectedValueOnce(foreignKeyError);
+
+    await expect(deletePaymentMethod(method.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+  });
+
+  test('maps a foreign-key error while deleting an acceptance to a conflict', async () => {
+    const merchant = await createMerchant('Concurrent Acceptance Merchant');
+    const method = await createPaymentMethod({ name: 'Concurrent Acceptance Method', type: 'credit_card' });
+    await addAcceptance(merchant.id, method.id);
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    jest.spyOn(prisma.merchantPaymentAcceptance, 'delete').mockRejectedValueOnce(foreignKeyError);
+
+    await expect(removeAcceptance(merchant.id, method.id)).rejects.toBeInstanceOf(RepositoryConflictError);
   });
 
   test('rethrows unexpected delete errors', async () => {

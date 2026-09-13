@@ -59,8 +59,14 @@ export async function removeAcceptance(merchantId: number, paymentMethodId: numb
     });
     return true;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-      return false;
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2025') {
+        return false;
+      }
+
+      if (error.code === 'P2003') {
+        throw new RepositoryConflictError('acceptance has reward rules');
+      }
     }
 
     throw error;
