@@ -12,7 +12,7 @@ type RewardRuleRow = {
   validityStart: Date;
   validityEnd: Date;
   promotionNote: string | null;
-  paymentMethod: { name: string; legacyId: string | null };
+  paymentMethod: { name: string };
 };
 
 function toRewardRuleRecord(rule: RewardRuleRow): RewardRuleRecord {
@@ -21,7 +21,6 @@ function toRewardRuleRecord(rule: RewardRuleRow): RewardRuleRecord {
     merchantId: rule.merchantId,
     paymentMethodId: rule.paymentMethodId,
     paymentMethodName: rule.paymentMethod.name,
-    paymentMethodLegacyId: rule.paymentMethod.legacyId,
     cashbackRate: Number(rule.cashbackRate),
     amountThreshold: rule.amountThreshold,
     validityStart: rule.validityStart,
@@ -40,7 +39,7 @@ const rewardRuleSelect = {
   validityEnd: true,
   promotionNote: true,
   paymentMethod: {
-    select: { name: true, legacyId: true }
+    select: { name: true }
   }
 } as const;
 

@@ -280,6 +280,7 @@ rewardRuleForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(rewardRuleForm);
   const payload = Object.fromEntries(formData.entries());
+  payload.paymentMethodId = Number(payload.paymentMethodId);
   payload.cashbackRate = Number(payload.cashbackRate);
   payload.amountThreshold = Number(payload.amountThreshold);
 

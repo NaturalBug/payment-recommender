@@ -33,7 +33,7 @@ describe('repository layer', () => {
   test('creates and reads persisted reward rules with payment method names', async () => {
     const merchant = await createMerchant('Rule Mart', 'Rule Mart');
     const paymentMethod = await prisma.paymentMethod.create({
-      data: { name: 'Test Visa', type: 'credit_card' }
+      data: { name: 'Test Visa', normalizedName: 'testvisa', type: 'credit_card' }
     });
     await addAcceptance(merchant.id, paymentMethod.id);
     const rule = await createRewardRule({

@@ -47,9 +47,15 @@ npm run db:seed
 ```
 
 Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the database file in `api/prisma/` and do not commit it; it is already ignored by git.
-After schema updates, always rerun `npm run db:seed`; it backfills normalized
-payment-method keys for existing local catalog data and stops with a readable
-error if existing names normalize to the same key.
+The catalog schema is intentionally not backward-compatible while the project
+is in its early stages. After pulling a schema update, reset and reinitialize
+the local database:
+
+```bash
+rm -f prisma/dev.db
+npx prisma db push
+npm run db:seed
+```
 
 Set `ADMIN_API_KEY` in `api/.env` before using the Admin Catalog page. The key
 must be sent in the `X-Admin-API-Key` header for every `/api/admin/*` request.
@@ -96,6 +102,8 @@ mappings:
 
 Configure a merchant in this order: create the merchant, create or choose a
 payment method, add its acceptance mapping, then create its reward rule.
+Reward-rule requests use the numeric payment-method ID returned by the payment
+method catalog.
 Merchant, payment-method, and acceptance deletion returns `409 Conflict` while
 dependent acceptance mappings or reward rules exist.
 

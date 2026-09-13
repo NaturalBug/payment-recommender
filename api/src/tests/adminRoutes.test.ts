@@ -15,11 +15,11 @@ describe('admin routes', () => {
 
     await prisma.paymentMethod.createMany({
       data: [
-        { name: 'VISA', type: 'credit_card' },
-        { name: 'AMEX Gold', type: 'credit_card' },
-        { name: 'LINE Pay', type: 'mobile_payment' },
-        { name: 'JKO Pay', type: 'mobile_payment' },
-        { name: 'Cash', type: 'debit_card' }
+        { name: 'VISA', normalizedName: 'visa', type: 'credit_card' },
+        { name: 'AMEX Gold', normalizedName: 'amexgold', type: 'credit_card' },
+        { name: 'LINE Pay', normalizedName: 'linepay', type: 'mobile_payment' },
+        { name: 'JKO Pay', normalizedName: 'jkopay', type: 'mobile_payment' },
+        { name: 'Cash', normalizedName: 'cash', type: 'debit_card' }
       ]
     });
 
@@ -123,7 +123,7 @@ describe('admin routes', () => {
       .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
-        paymentMethodId: 'visa',
+        paymentMethodId: method.id,
         cashbackRate: 0.05,
         amountThreshold: 200,
         validityStart: '2026-09-01',
@@ -134,6 +134,7 @@ describe('admin routes', () => {
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
     expect(response.body.data.merchantName).toBe('FamilyMart');
+    expect(response.body.data.paymentMethodId).toBe(method.id);
     expect(response.body.data.cashbackRate).toBe(0.05);
     await expect(
       prisma.merchantPaymentAcceptance.findUnique({
@@ -148,6 +149,7 @@ describe('admin routes', () => {
   });
 
   test('surfaces unexpected reward-rule write errors as server errors', async () => {
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
     jest.spyOn(rewardRuleRepository, 'createRewardRule').mockRejectedValueOnce(new Error('database unavailable'));
 
     const response = await request(app)
@@ -155,7 +157,7 @@ describe('admin routes', () => {
       .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
-        paymentMethodId: 'visa',
+        paymentMethodId: method.id,
         cashbackRate: 0.05,
         amountThreshold: 200,
         validityStart: '2026-09-01',
@@ -168,12 +170,14 @@ describe('admin routes', () => {
   });
 
   test('rejects a reward rule for an unaccepted payment method', async () => {
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
+
     const response = await request(app)
       .post('/api/admin/reward-rules')
       .set('X-Admin-API-Key', 'test-admin-key')
       .send({
         merchantName: 'FamilyMart',
-        paymentMethodId: 'amex',
+        paymentMethodId: method.id,
         cashbackRate: 0.05,
         amountThreshold: 0,
         validityStart: '2026-09-01',

@@ -12,7 +12,6 @@ model Merchant {
   id             Int    @id @default(autoincrement())
   name           String @unique
   normalizedName String @unique
-  seedKey        String? @unique
 
   chainName String?
   category  String?
@@ -24,11 +23,9 @@ model Merchant {
 }
 
 model PaymentMethod {
-  id             Int     @id @default(autoincrement())
-  name           String  @unique
-  normalizedName String? @unique
-  legacyId       String? @unique
-  seedKey        String? @unique
+  id             Int    @id @default(autoincrement())
+  name           String @unique
+  normalizedName String @unique
   type           String
 
   acceptedBy MerchantPaymentAcceptance[]

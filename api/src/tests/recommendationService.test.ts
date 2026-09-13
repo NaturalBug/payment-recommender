@@ -10,11 +10,11 @@ describe('getRecommendations', () => {
 
     await prisma.paymentMethod.createMany({
       data: [
-        { name: 'VISA', type: 'credit_card' },
-        { name: 'AMEX Gold', type: 'credit_card' },
-        { name: 'LINE Pay', type: 'mobile_payment' },
-        { name: 'JKO Pay', type: 'mobile_payment' },
-        { name: 'Cash', type: 'debit_card' }
+        { name: 'VISA', normalizedName: 'visa', type: 'credit_card' },
+        { name: 'AMEX Gold', normalizedName: 'amexgold', type: 'credit_card' },
+        { name: 'LINE Pay', normalizedName: 'linepay', type: 'mobile_payment' },
+        { name: 'JKO Pay', normalizedName: 'jkopay', type: 'mobile_payment' },
+        { name: 'Cash', normalizedName: 'cash', type: 'debit_card' }
       ]
     });
 

@@ -10,9 +10,8 @@ import {
 import {
   createPaymentMethod,
   deletePaymentMethod,
-  findPaymentMethodByLegacyIdOrName,
+  findPaymentMethodById,
   listPaymentMethods,
-  toLegacyPaymentMethodId,
   updatePaymentMethod
 } from '../repositories/paymentMethodRepository';
 import {
@@ -41,11 +40,11 @@ function parsePositiveIntId(value: string): number | null {
   return parsed;
 }
 
-function toLegacyRewardRule(rule: Awaited<ReturnType<typeof listRewardRules>>[number], merchantName: string) {
+function toRewardRuleResponse(rule: Awaited<ReturnType<typeof listRewardRules>>[number], merchantName: string) {
   return {
     id: String(rule.id),
     merchantName,
-    paymentMethodId: rule.paymentMethodLegacyId ?? toLegacyPaymentMethodId(rule.paymentMethodName),
+    paymentMethodId: rule.paymentMethodId,
     cashbackRate: Number(rule.cashbackRate),
     amountThreshold: rule.amountThreshold,
     validityStart: rule.validityStart.toISOString().slice(0, 10),
@@ -480,7 +479,7 @@ router.get('/reward-rules', async (_req, res) => {
           throw new Error(`merchant ${rule.merchantId} not found`);
         }
 
-        return toLegacyRewardRule(rule, merchantName);
+        return toRewardRuleResponse(rule, merchantName);
       })
     });
   } catch (error) {
@@ -494,13 +493,13 @@ router.get('/reward-rules', async (_req, res) => {
 router.post('/reward-rules', async (req, res) => {
   const { merchantName, paymentMethodId, cashbackRate, amountThreshold, validityStart, validityEnd, promotionNote } = req.body || {};
   const merchantNameValue = String(merchantName ?? '').trim();
-  const paymentMethodValue = String(paymentMethodId ?? '').trim();
+  const paymentMethodIdValue = Number(paymentMethodId);
   const cashbackRateValue = Number(cashbackRate ?? 0);
   const amountThresholdValue = Number(amountThreshold ?? 0);
   const validityStartValue = new Date(String(validityStart ?? ''));
   const validityEndValue = new Date(String(validityEnd ?? ''));
 
-  if (!merchantNameValue || !paymentMethodValue || !validityStart || !validityEnd) {
+  if (!merchantNameValue || !Number.isInteger(paymentMethodIdValue) || paymentMethodIdValue <= 0 || !validityStart || !validityEnd) {
     return res.status(400).json({
       success: false,
       message: 'merchantName, paymentMethodId, validityStart, and validityEnd are required'
@@ -530,7 +529,7 @@ router.post('/reward-rules', async (req, res) => {
       });
     }
 
-    const paymentMethod = await findPaymentMethodByLegacyIdOrName(paymentMethodValue);
+    const paymentMethod = await findPaymentMethodById(paymentMethodIdValue);
 
     if (!paymentMethod) {
       return res.status(400).json({
@@ -551,7 +550,7 @@ router.post('/reward-rules', async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      data: toLegacyRewardRule(createdRule, merchant.name)
+      data: toRewardRuleResponse(createdRule, merchant.name)
     });
   } catch (error) {
     if (error instanceof RepositoryConflictError) {

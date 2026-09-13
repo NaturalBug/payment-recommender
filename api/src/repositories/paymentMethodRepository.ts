@@ -7,17 +7,8 @@ import type { PaymentMethodInput, PaymentMethodRecord } from './types';
 const paymentMethodSelect = {
   id: true,
   name: true,
-  legacyId: true,
   type: true
 } as const;
-
-const legacyIds: Record<string, string> = {
-  amexgold: 'amex',
-  linepay: 'linepay',
-  jkopay: 'jko',
-  visa: 'visa',
-  cash: 'cash'
-};
 
 async function ensurePaymentMethodNameIsAvailable(name: string, excludedId?: number): Promise<void> {
   const normalizedName = normalizePaymentMethodKey(name);
@@ -121,28 +112,9 @@ export async function deletePaymentMethod(id: number): Promise<boolean> {
   }
 }
 
-export function toLegacyPaymentMethodId(paymentMethodName: string): string {
-  const key = normalizePaymentMethodKey(paymentMethodName);
-  return legacyIds[key] ?? key;
-}
-
-export async function findPaymentMethodByLegacyIdOrName(
-  value: string
-): Promise<PaymentMethodRecord | null> {
-  const trimmedValue = value.trim();
-  const normalizedValue = normalizePaymentMethodKey(value);
-  const paymentMethods = await prisma.paymentMethod.findMany({
-    orderBy: { id: 'asc' },
+export async function findPaymentMethodById(id: number): Promise<PaymentMethodRecord | null> {
+  return prisma.paymentMethod.findUnique({
+    where: { id },
     select: paymentMethodSelect
   });
-
-  return (
-    paymentMethods.find(
-      (paymentMethod) =>
-        String(paymentMethod.id) === trimmedValue ||
-        paymentMethod.legacyId === normalizedValue ||
-        normalizePaymentMethodKey(paymentMethod.name) === normalizedValue ||
-        toLegacyPaymentMethodId(paymentMethod.name) === normalizedValue
-    ) ?? null
-  );
 }
