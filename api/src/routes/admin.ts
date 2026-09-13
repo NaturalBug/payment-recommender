@@ -45,7 +45,7 @@ function toLegacyRewardRule(rule: Awaited<ReturnType<typeof listRewardRules>>[nu
   return {
     id: String(rule.id),
     merchantName,
-    paymentMethodId: toLegacyPaymentMethodId(rule.paymentMethodName),
+    paymentMethodId: rule.paymentMethodLegacyId ?? toLegacyPaymentMethodId(rule.paymentMethodName),
     cashbackRate: Number(rule.cashbackRate),
     amountThreshold: rule.amountThreshold,
     validityStart: rule.validityStart.toISOString().slice(0, 10),

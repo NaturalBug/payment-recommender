@@ -10,6 +10,7 @@ export type MerchantRecord = {
 export type PaymentMethodRecord = {
   id: number;
   name: string;
+  legacyId: string | null;
   type: string;
 };
 
@@ -29,6 +30,7 @@ export type RewardRuleRecord = {
   merchantId: number;
   paymentMethodId: number;
   paymentMethodName: string;
+  paymentMethodLegacyId?: string | null;
   cashbackRate: number;
   amountThreshold: number;
   validityStart: Date;

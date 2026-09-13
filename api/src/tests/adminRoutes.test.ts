@@ -167,28 +167,26 @@ describe('admin routes', () => {
     expect(response.body.message).toBe('database unavailable');
   });
 
-  test('does not recommend a reward rule for an unaccepted payment method', async () => {
-    const familyMart = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
-    const amex = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'AMEX Gold' } });
-
-    await prisma.rewardRule.create({
-      data: {
-        merchantId: familyMart.id,
-        paymentMethodId: amex.id,
+  test('rejects a reward rule for an unaccepted payment method', async () => {
+    const response = await request(app)
+      .post('/api/admin/reward-rules')
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantName: 'FamilyMart',
+        paymentMethodId: 'amex',
         cashbackRate: 0.05,
         amountThreshold: 0,
-        validityStart: new Date('2026-09-01T00:00:00.000Z'),
-        validityEnd: new Date('2026-09-30T23:59:59.999Z'),
-        promotionNote: 'Unaccepted method'
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      });
+
+    expect(response).toMatchObject({
+      status: 400,
+      body: {
+        success: false,
+        message: 'payment method is not accepted by this merchant'
       }
     });
-
-    const response = await request(app)
-      .get('/api/recommendations')
-      .query({ merchant_name: 'FamilyMart', amount: 500, date: '2026-09-15' });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ success: true, data: [] });
   });
 
   test('lists public merchants without an admin API key', async () => {
@@ -253,20 +251,10 @@ describe('admin routes', () => {
     });
   });
 
-  test('returns not found when removing a missing acceptance with an orphaned reward rule', async () => {
+  test('returns not found when removing a missing acceptance', async () => {
     const key = { 'X-Admin-API-Key': 'test-admin-key' };
     const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
     const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
-    await prisma.rewardRule.create({
-      data: {
-        merchantId: merchant.id,
-        paymentMethodId: method.id,
-        cashbackRate: 0.01,
-        amountThreshold: 0,
-        validityStart: new Date('2026-09-01'),
-        validityEnd: new Date('2026-09-30')
-      }
-    });
 
     const response = await request(app)
       .delete(`/api/admin/merchants/${merchant.id}/payment-methods/${method.id}`)

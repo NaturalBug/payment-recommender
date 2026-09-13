@@ -7,6 +7,7 @@ import type { PaymentMethodInput, PaymentMethodRecord } from './types';
 const paymentMethodSelect = {
   id: true,
   name: true,
+  legacyId: true,
   type: true
 } as const;
 
@@ -139,6 +140,7 @@ export async function findPaymentMethodByLegacyIdOrName(
     paymentMethods.find(
       (paymentMethod) =>
         String(paymentMethod.id) === trimmedValue ||
+        paymentMethod.legacyId === normalizedValue ||
         normalizePaymentMethodKey(paymentMethod.name) === normalizedValue ||
         toLegacyPaymentMethodId(paymentMethod.name) === normalizedValue
     ) ?? null

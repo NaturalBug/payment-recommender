@@ -6,6 +6,7 @@ import type { MerchantPaymentAcceptanceRecord, PaymentMethodRecord } from './typ
 const paymentMethodSelect = {
   id: true,
   name: true,
+  legacyId: true,
   type: true
 } as const;
 

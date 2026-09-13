@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import path from 'node:path';
 import { seedDatabase } from '../../prisma/seed';
+import { updateMerchant } from '../repositories/merchantRepository';
+import {
+  findPaymentMethodByLegacyIdOrName,
+  updatePaymentMethod
+} from '../repositories/paymentMethodRepository';
 
 jest.setTimeout(15000);
 
@@ -125,6 +130,39 @@ describe('data persistence', () => {
       });
 
       await expect(seedDatabase(prisma)).rejects.toThrow('payment method normalization conflict');
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  test('seed preserves renamed seeded catalog records', async () => {
+    const prisma = new PrismaClient({
+      datasources: {
+        db: { url: testDatabaseUrl }
+      }
+    });
+
+    try {
+      await seedDatabase(prisma);
+      const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+      const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+      await updateMerchant(merchant.id, 'Family Mart');
+      await updatePaymentMethod(method.id, { name: 'Visa Platinum', type: 'credit_card' });
+      await seedDatabase(prisma);
+
+      await expect(prisma.merchant.count()).resolves.toBe(4);
+      await expect(prisma.paymentMethod.count()).resolves.toBe(5);
+      await expect(
+        prisma.merchant.findUniqueOrThrow({ where: { id: merchant.id } })
+      ).resolves.toMatchObject({ name: 'Family Mart' });
+      await expect(
+        prisma.paymentMethod.findUniqueOrThrow({ where: { id: method.id } })
+      ).resolves.toMatchObject({ name: 'Visa Platinum' });
+      await expect(findPaymentMethodByLegacyIdOrName('visa')).resolves.toMatchObject({
+        id: method.id,
+        name: 'Visa Platinum'
+      });
     } finally {
       await prisma.$disconnect();
     }

@@ -3,18 +3,18 @@ import { normalizeMerchantName, normalizePaymentMethodKey } from '../src/lib/nor
 import { getDatabaseUrl } from '../src/config/env';
 
 export const merchants = [
-  { name: 'FamilyMart', chainName: 'FamilyMart' },
-  { name: '7-ELEVEN', chainName: '7-ELEVEN' },
-  { name: 'Starbucks', chainName: 'Starbucks' },
-  { name: 'PX Mart', chainName: 'PX Mart' }
+  { seedKey: 'familymart', name: 'FamilyMart', chainName: 'FamilyMart' },
+  { seedKey: '7-eleven', name: '7-ELEVEN', chainName: '7-ELEVEN' },
+  { seedKey: 'starbucks', name: 'Starbucks', chainName: 'Starbucks' },
+  { seedKey: 'px-mart', name: 'PX Mart', chainName: 'PX Mart' }
 ] as const;
 
 export const paymentMethods = [
-  { name: 'VISA', type: 'credit_card' },
-  { name: 'AMEX Gold', type: 'credit_card' },
-  { name: 'LINE Pay', type: 'mobile_payment' },
-  { name: 'JKO Pay', type: 'mobile_payment' },
-  { name: 'Cash', type: 'debit_card' }
+  { seedKey: 'visa', legacyId: 'visa', name: 'VISA', type: 'credit_card' },
+  { seedKey: 'amex-gold', legacyId: 'amex', name: 'AMEX Gold', type: 'credit_card' },
+  { seedKey: 'line-pay', legacyId: 'linepay', name: 'LINE Pay', type: 'mobile_payment' },
+  { seedKey: 'jko-pay', legacyId: 'jko', name: 'JKO Pay', type: 'mobile_payment' },
+  { seedKey: 'cash', legacyId: 'cash', name: 'Cash', type: 'debit_card' }
 ] as const;
 
 export const merchantPaymentAcceptances = [
@@ -62,14 +62,44 @@ async function backfillPaymentMethodNormalizedNames(prisma: PrismaClient): Promi
   );
 }
 
+async function backfillSeedKeys(prisma: PrismaClient): Promise<void> {
+  const [existingMerchants, existingPaymentMethods] = await Promise.all([
+    prisma.merchant.findMany({ select: { id: true, name: true, seedKey: true } }),
+    prisma.paymentMethod.findMany({ select: { id: true, name: true, seedKey: true, legacyId: true } })
+  ]);
+
+  await prisma.$transaction([
+    ...existingMerchants.flatMap((merchant) => {
+      const seed = merchants.find((item) => normalizeMerchantName(item.name) === normalizeMerchantName(merchant.name));
+      return seed && !merchant.seedKey
+        ? [prisma.merchant.update({ where: { id: merchant.id }, data: { seedKey: seed.seedKey } })]
+        : [];
+    }),
+    ...existingPaymentMethods.flatMap((paymentMethod) => {
+      const seed = paymentMethods.find(
+        (item) => normalizePaymentMethodKey(item.name) === normalizePaymentMethodKey(paymentMethod.name)
+      );
+      return seed && !paymentMethod.seedKey
+        ? [prisma.paymentMethod.update({
+          where: { id: paymentMethod.id },
+          data: { seedKey: seed.seedKey, legacyId: paymentMethod.legacyId ?? seed.legacyId }
+        })]
+        : [];
+    })
+  ]);
+}
+
 export async function seedDatabase(prisma: PrismaClient) {
+  await backfillSeedKeys(prisma);
+
   for (const merchant of merchants) {
     await prisma.merchant.upsert({
-      where: { name: merchant.name },
-      update: { normalizedName: normalizeMerchantName(merchant.name) },
+      where: { seedKey: merchant.seedKey },
+      update: {},
       create: {
         name: merchant.name,
         normalizedName: normalizeMerchantName(merchant.name),
+        seedKey: merchant.seedKey,
         chainName: merchant.chainName
       }
     });
@@ -77,11 +107,13 @@ export async function seedDatabase(prisma: PrismaClient) {
 
   for (const method of paymentMethods) {
     await prisma.paymentMethod.upsert({
-      where: { name: method.name },
-      update: { normalizedName: normalizePaymentMethodKey(method.name) },
+      where: { seedKey: method.seedKey },
+      update: {},
       create: {
         name: method.name,
         normalizedName: normalizePaymentMethodKey(method.name),
+        legacyId: method.legacyId,
+        seedKey: method.seedKey,
         type: method.type
       }
     });
@@ -90,11 +122,17 @@ export async function seedDatabase(prisma: PrismaClient) {
   await backfillPaymentMethodNormalizedNames(prisma);
 
   for (const acceptance of merchantPaymentAcceptances) {
+    const merchantSeed = merchants.find((item) => item.name === acceptance.merchantName);
+    const paymentMethodSeed = paymentMethods.find((item) => item.name === acceptance.paymentMethodName);
+    if (!merchantSeed || !paymentMethodSeed) {
+      throw new Error('seed acceptance references an unknown catalog record');
+    }
+
     const merchant = await prisma.merchant.findUniqueOrThrow({
-      where: { name: acceptance.merchantName }
+      where: { seedKey: merchantSeed.seedKey }
     });
     const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({
-      where: { name: acceptance.paymentMethodName }
+      where: { seedKey: paymentMethodSeed.seedKey }
     });
 
     await prisma.merchantPaymentAcceptance.upsert({
@@ -113,11 +151,17 @@ export async function seedDatabase(prisma: PrismaClient) {
   }
 
   for (const rule of rewardRules) {
+    const merchantSeed = merchants.find((item) => item.name === rule.merchantName);
+    const paymentMethodSeed = paymentMethods.find((item) => item.name === rule.paymentMethodName);
+    if (!merchantSeed || !paymentMethodSeed) {
+      throw new Error('seed reward rule references an unknown catalog record');
+    }
+
     const merchant = await prisma.merchant.findUniqueOrThrow({
-      where: { name: rule.merchantName }
+      where: { seedKey: merchantSeed.seedKey }
     });
     const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({
-      where: { name: rule.paymentMethodName }
+      where: { seedKey: paymentMethodSeed.seedKey }
     });
 
     await prisma.rewardRule.upsert({
