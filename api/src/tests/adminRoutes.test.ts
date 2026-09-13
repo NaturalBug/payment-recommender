@@ -209,6 +209,28 @@ describe('admin routes', () => {
       .resolves.toMatchObject({ status: 409 });
   });
 
+  test('rejects duplicate payment method names and incomplete requests', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+
+    const duplicate = await request(app)
+      .post('/api/admin/payment-methods')
+      .set(key)
+      .send({ name: 'visa', type: 'credit_card' });
+    const incomplete = await request(app)
+      .post('/api/admin/payment-methods')
+      .set(key)
+      .send({ name: 'New Pay' });
+
+    expect(duplicate).toMatchObject({
+      status: 409,
+      body: { success: false, message: 'payment method already exists' }
+    });
+    expect(incomplete).toMatchObject({
+      status: 400,
+      body: { success: false, message: 'name and type are required' }
+    });
+  });
+
   test('rejects removal of an accepted payment method with reward rules', async () => {
     const key = { 'X-Admin-API-Key': 'test-admin-key' };
     const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
@@ -226,6 +248,31 @@ describe('admin routes', () => {
     expect(response).toMatchObject({
       status: 409,
       body: { success: false, message: 'acceptance has reward rules' }
+    });
+  });
+
+  test('returns not found when removing a missing acceptance with an orphaned reward rule', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await prisma.rewardRule.create({
+      data: {
+        merchantId: merchant.id,
+        paymentMethodId: method.id,
+        cashbackRate: 0.01,
+        amountThreshold: 0,
+        validityStart: new Date('2026-09-01'),
+        validityEnd: new Date('2026-09-30')
+      }
+    });
+
+    const response = await request(app)
+      .delete(`/api/admin/merchants/${merchant.id}/payment-methods/${method.id}`)
+      .set(key);
+
+    expect(response).toMatchObject({
+      status: 404,
+      body: { success: false, message: 'acceptance not found' }
     });
   });
 

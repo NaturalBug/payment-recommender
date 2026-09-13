@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { normalizeMerchantName } from '../src/lib/normalization';
+import { normalizeMerchantName, normalizePaymentMethodKey } from '../src/lib/normalization';
 import { getDatabaseUrl } from '../src/config/env';
 
 export const merchants = [
@@ -55,8 +55,12 @@ export async function seedDatabase(prisma: PrismaClient) {
   for (const method of paymentMethods) {
     await prisma.paymentMethod.upsert({
       where: { name: method.name },
-      update: {},
-      create: { name: method.name, type: method.type }
+      update: { normalizedName: normalizePaymentMethodKey(method.name) },
+      create: {
+        name: method.name,
+        normalizedName: normalizePaymentMethodKey(method.name),
+        type: method.type
+      }
     });
   }
 

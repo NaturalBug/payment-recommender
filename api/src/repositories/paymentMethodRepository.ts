@@ -48,6 +48,7 @@ export async function createPaymentMethod(input: PaymentMethodInput): Promise<Pa
     return await prisma.paymentMethod.create({
       data: {
         name: trimmedName,
+        normalizedName: normalizePaymentMethodKey(trimmedName),
         type: input.type
       },
       select: paymentMethodSelect
@@ -73,6 +74,7 @@ export async function updatePaymentMethod(
       where: { id },
       data: {
         name: trimmedName,
+        normalizedName: normalizePaymentMethodKey(trimmedName),
         type: input.type
       },
       select: paymentMethodSelect

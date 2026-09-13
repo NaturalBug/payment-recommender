@@ -23,9 +23,10 @@ model Merchant {
 }
 
 model PaymentMethod {
-  id   Int    @id @default(autoincrement())
-  name String @unique
-  type String
+  id             Int     @id @default(autoincrement())
+  name           String  @unique
+  normalizedName String? @unique
+  type           String
 
   acceptedBy MerchantPaymentAcceptance[]
   rewardRules RewardRule[]

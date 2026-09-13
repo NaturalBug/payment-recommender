@@ -91,11 +91,14 @@ describe('repository layer', () => {
   });
 
   test('rejects creating a payment method with an existing normalized key', async () => {
-    await createPaymentMethod({ name: 'Line Pay', type: 'mobile_payment' });
+    const paymentMethod = await createPaymentMethod({ name: 'Line Pay', type: 'mobile_payment' });
 
     await expect(
       createPaymentMethod({ name: 'line-pay', type: 'mobile_payment' })
     ).rejects.toThrow('payment method already exists');
+    await expect(
+      prisma.paymentMethod.findUniqueOrThrow({ where: { id: paymentMethod.id } })
+    ).resolves.toMatchObject({ normalizedName: 'linepay' });
   });
 
   test('rejects updating a payment method to another method normalized key', async () => {
@@ -123,6 +126,24 @@ describe('repository layer', () => {
     });
 
     await expect(removeAcceptance(merchant.id, method.id)).rejects.toThrow('reward rules');
+  });
+
+  test('returns false when removing a missing acceptance with an orphaned reward rule', async () => {
+    const merchant = await createMerchant('Orphaned Reward Mart');
+    const method = await createPaymentMethod({ name: 'Orphaned Reward Pay', type: 'credit_card' });
+
+    await prisma.rewardRule.create({
+      data: {
+        merchantId: merchant.id,
+        paymentMethodId: method.id,
+        cashbackRate: 0.01,
+        amountThreshold: 0,
+        validityStart: new Date('2026-09-01'),
+        validityEnd: new Date('2026-09-30')
+      }
+    });
+
+    await expect(removeAcceptance(merchant.id, method.id)).resolves.toBe(false);
   });
 
   test('rejects creating a reward rule without an acceptance', async () => {

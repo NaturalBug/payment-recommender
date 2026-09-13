@@ -36,6 +36,15 @@ export async function addAcceptance(
 }
 
 export async function removeAcceptance(merchantId: number, paymentMethodId: number): Promise<boolean> {
+  const acceptance = await prisma.merchantPaymentAcceptance.findUnique({
+    where: { merchantId_paymentMethodId: { merchantId, paymentMethodId } },
+    select: { id: true }
+  });
+
+  if (!acceptance) {
+    return false;
+  }
+
   const rewardRuleCount = await prisma.rewardRule.count({
     where: { merchantId, paymentMethodId }
   });
