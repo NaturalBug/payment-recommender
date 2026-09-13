@@ -1,5 +1,14 @@
 import prisma from '../lib/prisma';
-import { createMerchant, listMerchants } from '../repositories/merchantRepository';
+import { createMerchant, deleteMerchant, listMerchants, updateMerchant } from '../repositories/merchantRepository';
+import {
+  addAcceptance,
+  removeAcceptance
+} from '../repositories/merchantPaymentAcceptanceRepository';
+import {
+  createPaymentMethod,
+  deletePaymentMethod,
+  updatePaymentMethod
+} from '../repositories/paymentMethodRepository';
 import { createRewardRule, deleteRewardRule, listRewardRules } from '../repositories/rewardRuleRepository';
 
 describe('repository layer', () => {
@@ -26,6 +35,7 @@ describe('repository layer', () => {
     const paymentMethod = await prisma.paymentMethod.create({
       data: { name: 'Test Visa', type: 'credit_card' }
     });
+    await addAcceptance(merchant.id, paymentMethod.id);
     const rule = await createRewardRule({
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
@@ -59,6 +69,76 @@ describe('repository layer', () => {
 
   test('returns false when deleting a missing reward rule', async () => {
     await expect(deleteRewardRule(999999)).resolves.toBe(false);
+  });
+
+  test('updates a merchant and rejects deletion while it has an acceptance', async () => {
+    const merchant = await createMerchant('Old Mart');
+    const method = await createPaymentMethod({ name: 'Test Pay', type: 'mobile_payment' });
+    await addAcceptance(merchant.id, method.id);
+
+    await expect(updateMerchant(merchant.id, 'New Mart')).resolves.toMatchObject({ name: 'New Mart' });
+    await expect(deleteMerchant(merchant.id)).rejects.toThrow('accepted payment methods');
+  });
+
+  test('updates a payment method and rejects deletion while it is accepted', async () => {
+    const merchant = await createMerchant('Test Mart');
+    const method = await createPaymentMethod({ name: 'Old Pay', type: 'credit_card' });
+    await addAcceptance(merchant.id, method.id);
+
+    await expect(updatePaymentMethod(method.id, { name: 'New Pay', type: 'mobile_payment' }))
+      .resolves.toMatchObject({ name: 'New Pay', type: 'mobile_payment' });
+    await expect(deletePaymentMethod(method.id)).rejects.toThrow('accepted by merchants');
+  });
+
+  test('rejects creating a payment method with an existing normalized key', async () => {
+    await createPaymentMethod({ name: 'Line Pay', type: 'mobile_payment' });
+
+    await expect(
+      createPaymentMethod({ name: 'line-pay', type: 'mobile_payment' })
+    ).rejects.toThrow('payment method already exists');
+  });
+
+  test('rejects updating a payment method to another method normalized key', async () => {
+    const firstMethod = await createPaymentMethod({ name: 'Line Pay', type: 'mobile_payment' });
+    const secondMethod = await createPaymentMethod({ name: 'JKO Pay', type: 'mobile_payment' });
+
+    await expect(
+      updatePaymentMethod(secondMethod.id, { name: 'line-pay', type: 'mobile_payment' })
+    ).rejects.toThrow('payment method already exists');
+    await expect(updatePaymentMethod(firstMethod.id, { name: 'line-pay', type: 'mobile_payment' }))
+      .resolves.toMatchObject({ name: 'line-pay' });
+  });
+
+  test('rejects removing an acceptance that has a reward rule', async () => {
+    const merchant = await createMerchant('Reward Mart');
+    const method = await createPaymentMethod({ name: 'Reward Pay', type: 'credit_card' });
+    await addAcceptance(merchant.id, method.id);
+    await createRewardRule({
+      merchantId: merchant.id,
+      paymentMethodId: method.id,
+      cashbackRate: 0.01,
+      amountThreshold: 0,
+      validityStart: new Date('2026-09-01'),
+      validityEnd: new Date('2026-09-30')
+    });
+
+    await expect(removeAcceptance(merchant.id, method.id)).rejects.toThrow('reward rules');
+  });
+
+  test('rejects creating a reward rule without an acceptance', async () => {
+    const merchant = await createMerchant('Unaccepted Reward Mart');
+    const method = await createPaymentMethod({ name: 'Unaccepted Reward Pay', type: 'credit_card' });
+
+    await expect(
+      createRewardRule({
+        merchantId: merchant.id,
+        paymentMethodId: method.id,
+        cashbackRate: 0.01,
+        amountThreshold: 0,
+        validityStart: new Date('2026-09-01'),
+        validityEnd: new Date('2026-09-30')
+      })
+    ).rejects.toThrow('payment method is not accepted by this merchant');
   });
 
   test('rethrows unexpected delete errors', async () => {
