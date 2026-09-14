@@ -15,8 +15,10 @@ import { RepositoryConflictError } from '../repositories/errors';
 
 describe('repository layer', () => {
   beforeEach(async () => {
+    await prisma.promotionDraft.deleteMany();
     await prisma.rewardRule.deleteMany();
     await prisma.merchantPaymentAcceptance.deleteMany();
+    await prisma.importRun.deleteMany();
     await prisma.merchant.deleteMany();
     await prisma.paymentMethod.deleteMany();
   });
