@@ -1,3 +1,4 @@
+import { PrismaClient } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { RepositoryConflictError, RepositoryValidationError } from '../repositories/errors';
 import { addAcceptance } from '../repositories/merchantPaymentAcceptanceRepository';
@@ -17,6 +18,14 @@ import {
 import type { ImportedPromotionDraft, PromotionDraftReviewInput } from '../repositories/types';
 
 describe('promotion import repository', () => {
+  const concurrentPrisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL
+      }
+    }
+  });
+
   beforeEach(async () => {
     await prisma.promotionDraft.deleteMany();
     await prisma.rewardRule.deleteMany();
@@ -27,6 +36,7 @@ describe('promotion import repository', () => {
   });
 
   afterAll(async () => {
+    await concurrentPrisma.$disconnect();
     await prisma.$disconnect();
   });
 
@@ -68,6 +78,65 @@ describe('promotion import repository', () => {
     };
 
     return { draft, merchant, paymentMethod, reviewInput };
+  }
+
+  async function withConcurrentDraftFinalization<T>(
+    _draftId: number,
+    finalizeDraft: () => Promise<unknown>,
+    action: () => Promise<T>
+  ): Promise<T> {
+    const originalTransaction = prisma.$transaction.bind(prisma) as (...args: unknown[]) => Promise<unknown>;
+    const transactionSpy = jest.spyOn(prisma, '$transaction');
+
+    transactionSpy.mockImplementationOnce((async (...args: unknown[]) => {
+      await finalizeDraft();
+      return originalTransaction(...args);
+    }) as never);
+
+    try {
+      return await action();
+    } finally {
+      transactionSpy.mockRestore();
+    }
+  }
+
+  async function publishDraftConcurrently(draftId: number): Promise<void> {
+    await concurrentPrisma.$transaction(async (transaction) => {
+      const draft = await transaction.promotionDraft.findUniqueOrThrow({
+        where: { id: draftId },
+        select: {
+          merchantId: true,
+          paymentMethodId: true,
+          cashbackRate: true,
+          amountThreshold: true,
+          validityStart: true,
+          validityEnd: true,
+          promotionNote: true
+        }
+      });
+
+      const rewardRule = await transaction.rewardRule.create({
+        data: {
+          merchantId: draft.merchantId!,
+          paymentMethodId: draft.paymentMethodId!,
+          cashbackRate: draft.cashbackRate!,
+          amountThreshold: draft.amountThreshold!,
+          validityStart: draft.validityStart!,
+          validityEnd: draft.validityEnd!,
+          promotionNote: draft.promotionNote
+        }
+      });
+
+      await transaction.promotionDraft.update({
+        where: { id: draftId },
+        data: {
+          status: 'published',
+          rewardRuleId: rewardRule.id,
+          reviewedAt: new Date('2026-09-15T00:00:00.000Z'),
+          rejectionReason: null
+        }
+      });
+    });
   }
 
   test('records import run lifecycle transitions', async () => {
@@ -121,6 +190,41 @@ describe('promotion import repository', () => {
       sourceContent: '5% cashback',
       parsedCashbackRate: 0.05,
       status: 'pending_review'
+    });
+  });
+
+  test('does not overwrite a draft finalized during a repeated import', async () => {
+    const { draft, input } = await createDraftFixture();
+    const nextRun = await createImportRun('line-pay');
+
+    const repeated = await withConcurrentDraftFinalization(
+      draft.id,
+      async () => {
+        await concurrentPrisma.promotionDraft.update({
+          where: { id: draft.id },
+          data: {
+            status: 'rejected',
+            reviewedAt: new Date('2026-09-15T00:00:00.000Z'),
+            rejectionReason: 'Concurrent review'
+          }
+        });
+      },
+      () =>
+        upsertPendingDraft({
+          ...input,
+          importRunId: nextRun.id,
+          sourceContent: 'changed source text',
+          parsedCashbackRate: 0.08
+        })
+    );
+
+    expect(repeated).toMatchObject({
+      id: draft.id,
+      importRunId: input.importRunId,
+      status: 'rejected',
+      sourceContent: input.sourceContent,
+      parsedCashbackRate: null,
+      rejectionReason: 'Concurrent review'
     });
   });
 
@@ -205,6 +309,64 @@ describe('promotion import repository', () => {
         select: { promotionNote: true }
       })
     ).resolves.toMatchObject({ promotionNote: 'Verified manually' });
+  });
+
+  test('rejects stale review updates after a concurrent publish', async () => {
+    const { draft, reviewInput } = await createReviewedDraftFixture();
+    await updatePromotionDraft(draft.id, reviewInput);
+
+    await expect(
+      withConcurrentDraftFinalization(
+        draft.id,
+        () => publishDraftConcurrently(draft.id),
+        () =>
+          updatePromotionDraft(draft.id, {
+            ...reviewInput,
+            cashbackRate: 0.09
+          })
+      )
+    ).rejects.toBeInstanceOf(RepositoryConflictError);
+
+    const persistedDraft = await prisma.promotionDraft.findUnique({
+      where: { id: draft.id },
+      select: {
+        status: true,
+        cashbackRate: true,
+        rewardRuleId: true
+      }
+    });
+
+    expect(persistedDraft).toMatchObject({
+      status: 'published',
+      rewardRuleId: expect.any(Number)
+    });
+    expect(Number(persistedDraft?.cashbackRate)).toBe(0.05);
+  });
+
+  test('rejects stale draft rejection after a concurrent publish', async () => {
+    const { draft, reviewInput } = await createReviewedDraftFixture();
+    await updatePromotionDraft(draft.id, reviewInput);
+
+    await expect(
+      withConcurrentDraftFinalization(draft.id, () => publishDraftConcurrently(draft.id), () =>
+        rejectPromotionDraft(draft.id, 'Stale rejection')
+      )
+    ).rejects.toBeInstanceOf(RepositoryConflictError);
+
+    await expect(
+      prisma.promotionDraft.findUnique({
+        where: { id: draft.id },
+        select: {
+          status: true,
+          rejectionReason: true,
+          rewardRuleId: true
+        }
+      })
+    ).resolves.toMatchObject({
+      status: 'published',
+      rejectionReason: null,
+      rewardRuleId: expect.any(Number)
+    });
   });
 
   test('does not overwrite a published draft during a later import', async () => {

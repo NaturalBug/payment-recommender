@@ -61,6 +61,11 @@ type RewardRuleRow = {
   paymentMethod: { name: string };
 };
 
+type PendingDraftWriteResult =
+  | { kind: 'updated'; draft: PromotionDraftRow }
+  | { kind: 'finalized'; draft: PromotionDraftRow }
+  | { kind: 'missing' };
+
 const editableDraftStatuses = ['pending_review'] as const;
 
 const importRunSelect = {
@@ -264,6 +269,41 @@ function mapPrismaError(error: unknown): never {
   throw error;
 }
 
+async function writePendingDraft(
+  id: number,
+  data: Prisma.PromotionDraftUncheckedUpdateInput
+): Promise<PendingDraftWriteResult> {
+  return prisma.$transaction(async (transaction) => {
+    const updatedDrafts = await transaction.promotionDraft.updateMany({
+      where: {
+        id,
+        status: 'pending_review'
+      },
+      data
+    });
+
+    if (updatedDrafts.count === 1) {
+      const updatedDraft = await transaction.promotionDraft.findUniqueOrThrow({
+        where: { id },
+        select: promotionDraftSelect
+      });
+
+      return { kind: 'updated', draft: updatedDraft };
+    }
+
+    const currentDraft = await transaction.promotionDraft.findUnique({
+      where: { id },
+      select: promotionDraftSelect
+    });
+
+    if (!currentDraft) {
+      return { kind: 'missing' };
+    }
+
+    return { kind: 'finalized', draft: currentDraft };
+  });
+}
+
 export async function createImportRun(source: ImportSource): Promise<ImportRunRecord> {
   const run = await prisma.importRun.create({
     data: {
@@ -320,13 +360,13 @@ export async function upsertPendingDraft(input: ImportedPromotionDraft): Promise
     }
 
     try {
-      const updatedDraft = await prisma.promotionDraft.update({
-        where: { id: existingDraft.id },
-        data: toDraftUpdateData(input),
-        select: promotionDraftSelect
-      });
+      const updatedDraft = await writePendingDraft(existingDraft.id, toDraftUpdateData(input));
 
-      return toPromotionDraftRecord(updatedDraft);
+      if (updatedDraft.kind === 'missing') {
+        throw new RepositoryValidationError('promotion draft not found');
+      }
+
+      return toPromotionDraftRecord(updatedDraft.draft);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
         throw new RepositoryValidationError('import run is invalid');
@@ -362,13 +402,13 @@ export async function upsertPendingDraft(input: ImportedPromotionDraft): Promise
         return toPromotionDraftRecord(duplicateDraft);
       }
 
-      const updatedDraft = await prisma.promotionDraft.update({
-        where: { id: duplicateDraft.id },
-        data: toDraftUpdateData(input),
-        select: promotionDraftSelect
-      });
+      const updatedDraft = await writePendingDraft(duplicateDraft.id, toDraftUpdateData(input));
 
-      return toPromotionDraftRecord(updatedDraft);
+      if (updatedDraft.kind === 'missing') {
+        throw new RepositoryValidationError('promotion draft not found');
+      }
+
+      return toPromotionDraftRecord(updatedDraft.draft);
     }
 
     throw error;
@@ -389,21 +429,8 @@ export async function updatePromotionDraft(
   id: number,
   input: PromotionDraftReviewInput
 ): Promise<PromotionDraftRecord | null> {
-  const draft = await prisma.promotionDraft.findUnique({
-    where: { id },
-    select: promotionDraftSelect
-  });
-
-  if (!draft) {
-    return null;
-  }
-
-  ensureDraftIsEditable(draft);
-
   try {
-    const updatedDraft = await prisma.promotionDraft.update({
-      where: { id },
-      data: {
+    const updatedDraft = await writePendingDraft(id, {
         merchantId: input.merchantId,
         paymentMethodId: input.paymentMethodId,
         cashbackRate: input.cashbackRate,
@@ -412,11 +439,17 @@ export async function updatePromotionDraft(
         validityEnd: input.validityEnd,
         promotionNote: input.promotionNote ?? null,
         rejectionReason: null
-      },
-      select: promotionDraftSelect
     });
 
-    return toPromotionDraftRecord(updatedDraft);
+    if (updatedDraft.kind === 'missing') {
+      return null;
+    }
+
+    if (updatedDraft.kind === 'finalized') {
+      throw new RepositoryConflictError('promotion draft is no longer pending review');
+    }
+
+    return toPromotionDraftRecord(updatedDraft.draft);
   } catch (error) {
     mapPrismaError(error);
   }
@@ -429,28 +462,21 @@ export async function rejectPromotionDraft(id: number, reason: string): Promise<
     throw new RepositoryValidationError('rejection reason is required');
   }
 
-  const draft = await prisma.promotionDraft.findUnique({
-    where: { id },
-    select: promotionDraftSelect
+  const rejectedDraft = await writePendingDraft(id, {
+    status: 'rejected',
+    reviewedAt: new Date(),
+    rejectionReason: trimmedReason
   });
 
-  if (!draft) {
+  if (rejectedDraft.kind === 'missing') {
     return null;
   }
 
-  ensureDraftIsEditable(draft);
+  if (rejectedDraft.kind === 'finalized') {
+    throw new RepositoryConflictError('promotion draft is no longer pending review');
+  }
 
-  const rejectedDraft = await prisma.promotionDraft.update({
-    where: { id },
-    data: {
-      status: 'rejected',
-      reviewedAt: new Date(),
-      rejectionReason: trimmedReason
-    },
-    select: promotionDraftSelect
-  });
-
-  return toPromotionDraftRecord(rejectedDraft);
+  return toPromotionDraftRecord(rejectedDraft.draft);
 }
 
 export async function publishPromotionDraft(id: number): Promise<PublishedDraftResult> {
