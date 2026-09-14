@@ -1,11 +1,11 @@
 import prisma from '../lib/prisma';
 import { RepositoryValidationError } from '../repositories/errors';
-import { listImportRuns, listPromotionDrafts } from '../repositories/promotionImportRepository';
-import type { PromotionSourceAdapter } from '../importers/types';
+import { fetchOfficialPage, getPromotionSourceAdapter } from '../importers';
 import { createIpassMoneyImporter } from '../importers/ipassMoneyImporter';
-import { getPromotionSourceAdapter } from '../importers';
 import { createJkoPayImporter } from '../importers/jkoPayImporter';
 import { createLinePayImporter } from '../importers/linePayImporter';
+import { listImportRuns, listPromotionDrafts } from '../repositories/promotionImportRepository';
+import type { PromotionSourceAdapter } from '../importers/types';
 import { runPromotionImport } from '../services/promotionImportService';
 
 describe('promotion import service', () => {
@@ -91,6 +91,31 @@ describe('promotion import service', () => {
     expect(results[0].sourceContent).not.toHaveLength(0);
   });
 
+  test('does not read redirected non-official content when fetching official pages', async () => {
+    const originalFetch = global.fetch;
+    const text = jest.fn().mockResolvedValue('<html>off-platform content</html>');
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      statusText: 'Found',
+      text
+    } as unknown as Response);
+
+    await expect(fetchOfficialPage('https://pay.line.me/portal/tw/about/promotions')).rejects.toThrow(
+      'redirects are not allowed'
+    );
+    expect(global.fetch).toHaveBeenCalledWith('https://pay.line.me/portal/tw/about/promotions', {
+      headers: {
+        'User-Agent': 'payment-recommender-importer/1.0 (+https://github.com/)'
+      },
+      redirect: 'manual'
+    });
+    expect(text).not.toHaveBeenCalled();
+
+    global.fetch = originalFetch;
+  });
+
   test('normalizes JKO Pay fixture content into a deterministic candidate', async () => {
     const fetchPage = jest.fn().mockResolvedValue(`
       <div class="campaign-list">
@@ -116,6 +141,22 @@ describe('promotion import service', () => {
       })
     ]);
     expect(results[0].sourceContent).not.toHaveLength(0);
+  });
+
+  test('does not parse age eligibility text as an amount threshold', async () => {
+    const fetchPage = jest.fn().mockResolvedValue(`
+      <div class="campaign-list">
+        <a class="campaign-card" href="/event/adult-only-bonus">
+          <h3>成年會員活動</h3>
+          <p>年滿 18 歲以上可參加，活動期間 2026-10-01 至 2026-10-31 享 3% 回饋。</p>
+        </a>
+      </div>
+    `);
+
+    const [result] = await createJkoPayImporter(fetchPage).import();
+
+    expect(result.parsedCashbackRate).toBe(0.03);
+    expect(result.parsedAmountThreshold).toBeUndefined();
   });
 
   test('leaves unparseable iPASS MONEY fields undefined instead of guessing', async () => {

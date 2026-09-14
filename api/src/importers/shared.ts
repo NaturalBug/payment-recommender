@@ -58,9 +58,10 @@ function parseCashbackRate(sourceContent: string): number | undefined {
 }
 
 function parseAmountThreshold(sourceContent: string): number | undefined {
-  const match = sourceContent.match(
-    /(?:單筆滿|消費滿|滿額|滿)\s*(?:NT\$|NTD\$?|新臺幣)?\s*([0-9][0-9,]*)\s*元?/i
-  );
+  const match =
+    sourceContent.match(/(?:單筆滿|消費滿|滿額)\s*(?:NT\$|NTD\$?|新臺幣)?\s*([0-9][0-9,]*)\s*元?/i) ??
+    sourceContent.match(/滿\s*(?:NT\$|NTD\$?|新臺幣)\s*([0-9][0-9,]*)\s*元?/i) ??
+    sourceContent.match(/滿\s*([0-9][0-9,]*)\s*元/i);
 
   if (!match) {
     return undefined;
@@ -167,11 +168,18 @@ function toPromotionCandidate(
 }
 
 export async function fetchOfficialPage(url: string): Promise<string> {
+  buildOfficialUrl(url, [new URL(url).hostname]);
+
   const response = await fetch(url, {
     headers: {
       'User-Agent': officialUserAgent
-    }
+    },
+    redirect: 'manual'
   });
+
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`failed to fetch ${url}: redirects are not allowed`);
+  }
 
   if (!response.ok) {
     throw new Error(`failed to fetch ${url}: ${response.status} ${response.statusText}`);
@@ -182,14 +190,15 @@ export async function fetchOfficialPage(url: string): Promise<string> {
 
 export function createPromotionSourceAdapter(
   config: SourceImporterConfig,
-  fetchPage: FetchPage = fetchOfficialPage
+  fetchPage?: FetchPage
 ): PromotionSourceAdapter {
   const listUrl = buildOfficialUrl(config.listUrl, config.allowedHostnames).toString();
+  const fetchConfiguredPage = fetchPage ?? ((pageUrl: string) => fetchOfficialPage(pageUrl));
 
   return {
     source: config.source,
     async import() {
-      const html = await fetchPage(listUrl);
+      const html = await fetchConfiguredPage(listUrl);
 
       return extractLinkedCards(html)
         .map((card) => toPromotionCandidate(config, listUrl, card))
