@@ -221,3 +221,161 @@ th, td {
     grid-template-columns: 1fr;
   }
 }
+
+.promotion-review-section {
+  border-top: 1px solid #e6edf4;
+  margin-top: 28px;
+  padding-top: 24px;
+}
+
+.promotion-review-heading {
+  align-items: end;
+}
+
+.promotion-filter {
+  min-width: 180px;
+}
+
+.promotion-draft-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.promotion-draft-card {
+  border: 1px solid #dfe6ee;
+  border-radius: 16px;
+  padding: 20px;
+  background: #fbfdff;
+}
+
+.promotion-draft-header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.promotion-draft-header h3,
+.promotion-draft-source-block h4 {
+  margin: 0;
+}
+
+.promotion-draft-status {
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 6px 10px;
+  text-transform: capitalize;
+}
+
+.promotion-draft-status-pending_review {
+  background: #eef5fc;
+  color: #1976d2;
+}
+
+.promotion-draft-status-published {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.promotion-draft-status-rejected {
+  background: #fff1f3;
+  color: #c01048;
+}
+
+.promotion-draft-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 16px;
+}
+
+.promotion-draft-meta div {
+  min-width: 0;
+}
+
+.promotion-draft-meta dt {
+  color: #667085;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+
+.promotion-draft-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.promotion-draft-meta-wide {
+  grid-column: 1 / -1;
+}
+
+.promotion-draft-link,
+.promotion-draft-link-text {
+  overflow-wrap: anywhere;
+}
+
+.promotion-draft-source-block {
+  background: white;
+  border: 1px solid #e6edf4;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.promotion-draft-source-content {
+  font-family: inherit;
+  margin: 12px 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.promotion-draft-form {
+  display: grid;
+  gap: 12px;
+}
+
+.promotion-draft-form.is-pending {
+  opacity: 0.72;
+}
+
+.promotion-draft-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.promotion-draft-grid-wide {
+  grid-column: 1 / -1;
+}
+
+.promotion-draft-hint,
+.promotion-draft-readonly-note {
+  margin: 0;
+}
+
+.promotion-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .promotion-draft-meta,
+  .promotion-draft-grid,
+  .promotion-review-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .promotion-draft-header,
+  .promotion-review-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .promotion-filter {
+    min-width: 0;
+  }
+}

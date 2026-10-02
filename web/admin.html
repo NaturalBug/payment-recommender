@@ -116,6 +116,24 @@
           <h2>Reward rules</h2>
           <div id="reward-rules" class="table-wrapper"></div>
         </section>
+
+        <section class="promotion-review-section">
+          <div class="section-heading promotion-review-heading">
+            <div>
+              <h2>Imported promotions</h2>
+              <p class="muted">Review imported drafts before publishing them into live reward rules.</p>
+            </div>
+            <label class="promotion-filter">
+              Status
+              <select id="promotion-draft-status" name="promotionDraftStatus">
+                <option value="pending_review" selected>Pending review</option>
+                <option value="published">Published</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+          </div>
+          <div id="promotion-drafts" class="promotion-draft-list"></div>
+        </section>
       </fieldset>
     </main>
 
