@@ -25,12 +25,132 @@ import {
   listRewardRules
 } from '../repositories/rewardRuleRepository';
 import {
+  findPromotionDraft,
+  listImportRuns,
+  listPromotionDrafts,
+  publishPromotionDraft,
+  rejectPromotionDraft,
+  updatePromotionDraft
+} from '../repositories/promotionImportRepository';
+import {
   MerchantAlreadyExistsError,
   RepositoryConflictError,
   RepositoryValidationError
 } from '../repositories/errors';
+import type {
+  PromotionDraftReviewInput,
+  PromotionDraftStatus
+} from '../repositories/types';
 
 const router = Router();
+const promotionDraftStatuses: PromotionDraftStatus[] = ['pending_review', 'published', 'rejected'];
+const promotionDraftReviewFields = [
+  'merchantId',
+  'paymentMethodId',
+  'cashbackRate',
+  'amountThreshold',
+  'validityStart',
+  'validityEnd',
+  'promotionNote'
+] as const;
+
+function parseOptionalDate(value: unknown): Date {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new RepositoryValidationError('validity dates must use YYYY-MM-DD format');
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new RepositoryValidationError('validity dates must be valid calendar dates');
+  }
+
+  return date;
+}
+
+function parseNumericValue(value: unknown, field: string): number {
+  if (
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && !value.trim())
+  ) {
+    throw new RepositoryValidationError(`${field} must be numeric`);
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new RepositoryValidationError(`${field} must be numeric`);
+  }
+
+  return parsed;
+}
+
+function parsePromotionDraftReviewPatch(
+  body: unknown,
+  existing: NonNullable<Awaited<ReturnType<typeof findPromotionDraft>>>
+): PromotionDraftReviewInput {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new RepositoryValidationError('review fields are required');
+  }
+
+  const values = body as Record<string, unknown>;
+  const keys = Object.keys(values);
+  if (keys.length === 0 || keys.some((key) => !promotionDraftReviewFields.includes(key as typeof promotionDraftReviewFields[number]))) {
+    throw new RepositoryValidationError('review fields are required or contain unsupported fields');
+  }
+
+  const patch: PromotionDraftReviewInput = {};
+
+  for (const field of ['merchantId', 'paymentMethodId'] as const) {
+    if (values[field] === undefined) continue;
+    const parsed = parseNumericValue(values[field], field);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new RepositoryValidationError(`${field} must be a positive integer`);
+    }
+    patch[field] = parsed;
+  }
+
+  if (values.cashbackRate !== undefined) {
+    const cashbackRate = parseNumericValue(values.cashbackRate, 'cashbackRate');
+    if (!Number.isFinite(cashbackRate) || cashbackRate < 0) {
+      throw new RepositoryValidationError('cashbackRate must be a non-negative number');
+    }
+    patch.cashbackRate = cashbackRate;
+  }
+
+  if (values.amountThreshold !== undefined) {
+    const amountThreshold = parseNumericValue(values.amountThreshold, 'amountThreshold');
+    if (!Number.isInteger(amountThreshold) || amountThreshold < 0) {
+      throw new RepositoryValidationError('amountThreshold must be a non-negative integer');
+    }
+    patch.amountThreshold = amountThreshold;
+  }
+
+  if (values.validityStart !== undefined) {
+    patch.validityStart = parseOptionalDate(values.validityStart);
+  }
+
+  if (values.validityEnd !== undefined) {
+    const endDate = parseOptionalDate(values.validityEnd);
+    patch.validityEnd = new Date(`${endDate.toISOString().slice(0, 10)}T23:59:59.999Z`);
+  }
+
+  if (values.promotionNote !== undefined) {
+    if (values.promotionNote !== null && typeof values.promotionNote !== 'string') {
+      throw new RepositoryValidationError('promotionNote must be a string');
+    }
+    if (typeof values.promotionNote === 'string' && values.promotionNote.length > 500) {
+      throw new RepositoryValidationError('promotionNote cannot exceed 500 characters');
+    }
+    patch.promotionNote = typeof values.promotionNote === 'string' ? values.promotionNote.trim() || null : null;
+  }
+
+  const start = patch.validityStart ?? existing.validityStart ?? existing.parsedValidityStart ?? null;
+  const end = patch.validityEnd ?? existing.validityEnd ?? existing.parsedValidityEnd ?? null;
+  if (start && end && end < start) {
+    throw new RepositoryValidationError('validityEnd must be on or after validityStart');
+  }
+
+  return patch;
+}
 
 function parsePositiveIntId(value: string): number | null {
   const parsed = Number(value);
@@ -457,6 +577,136 @@ router.delete('/merchants/:merchantId/payment-methods/:paymentMethodId', async (
     return res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'unable to remove acceptance'
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Imported Promotion Review
+// ---------------------------------------------------------------------------
+
+router.get('/import-runs', async (_req, res) => {
+  try {
+    const runs = await listImportRuns();
+    return res.json({ success: true, data: runs });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list import runs'
+    });
+  }
+});
+
+router.get('/promotion-drafts', async (req, res) => {
+  const rawStatus = req.query.status;
+  if (rawStatus !== undefined && (
+    typeof rawStatus !== 'string' ||
+    !promotionDraftStatuses.includes(rawStatus as PromotionDraftStatus)
+  )) {
+    return res.status(400).json({ success: false, message: 'status is invalid' });
+  }
+
+  try {
+    const drafts = await listPromotionDrafts(rawStatus as PromotionDraftStatus | undefined);
+    return res.json({ success: true, data: drafts });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list promotion drafts'
+    });
+  }
+});
+
+router.patch('/promotion-drafts/:id', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'promotion draft not found' });
+  }
+
+  try {
+    const existing = await findPromotionDraft(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'promotion draft not found' });
+    }
+
+    const updated = await updatePromotionDraft(id, parsePromotionDraftReviewPatch(req.body, existing));
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'promotion draft not found' });
+    }
+
+    return res.json({ success: true, data: updated });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to update promotion draft'
+    });
+  }
+});
+
+router.post('/promotion-drafts/:id/publish', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'promotion draft not found' });
+  }
+
+  try {
+    const result = await publishPromotionDraft(id);
+    return res.status(201).json({
+      success: true,
+      data: { ...result.draft, rewardRule: result.rewardRule }
+    });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      const status = error.message === 'promotion draft not found' ? 404 : 400;
+      return res.status(status).json({ success: false, message: error.message });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to publish promotion draft'
+    });
+  }
+});
+
+router.post('/promotion-drafts/:id/reject', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'promotion draft not found' });
+  }
+
+  const reason = req.body?.reason;
+  if (typeof reason !== 'string' || !reason.trim()) {
+    return res.status(400).json({ success: false, message: 'rejection reason is required' });
+  }
+
+  try {
+    const rejected = await rejectPromotionDraft(id, reason);
+    if (!rejected) {
+      return res.status(404).json({ success: false, message: 'promotion draft not found' });
+    }
+
+    return res.json({ success: true, data: rejected });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to reject promotion draft'
     });
   }
 });

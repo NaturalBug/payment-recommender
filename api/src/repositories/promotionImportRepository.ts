@@ -425,21 +425,33 @@ export async function listPromotionDrafts(status?: PromotionDraftStatus): Promis
   return drafts.map(toPromotionDraftRecord);
 }
 
+export async function findPromotionDraft(id: number): Promise<PromotionDraftRecord | null> {
+  const draft = await prisma.promotionDraft.findUnique({
+    where: { id },
+    select: promotionDraftSelect
+  });
+
+  return draft ? toPromotionDraftRecord(draft) : null;
+}
+
 export async function updatePromotionDraft(
   id: number,
   input: PromotionDraftReviewInput
 ): Promise<PromotionDraftRecord | null> {
+  const data: Prisma.PromotionDraftUncheckedUpdateInput = {
+    rejectionReason: null
+  };
+
+  if (input.merchantId !== undefined) data.merchantId = input.merchantId;
+  if (input.paymentMethodId !== undefined) data.paymentMethodId = input.paymentMethodId;
+  if (input.cashbackRate !== undefined) data.cashbackRate = input.cashbackRate;
+  if (input.amountThreshold !== undefined) data.amountThreshold = input.amountThreshold;
+  if (input.validityStart !== undefined) data.validityStart = input.validityStart;
+  if (input.validityEnd !== undefined) data.validityEnd = input.validityEnd;
+  if (input.promotionNote !== undefined) data.promotionNote = input.promotionNote;
+
   try {
-    const updatedDraft = await writePendingDraft(id, {
-        merchantId: input.merchantId,
-        paymentMethodId: input.paymentMethodId,
-        cashbackRate: input.cashbackRate,
-        amountThreshold: input.amountThreshold,
-        validityStart: input.validityStart,
-        validityEnd: input.validityEnd,
-        promotionNote: input.promotionNote ?? null,
-        rejectionReason: null
-    });
+    const updatedDraft = await writePendingDraft(id, data);
 
     if (updatedDraft.kind === 'missing') {
       return null;
