@@ -279,7 +279,11 @@ describe('promotion import repository', () => {
       amountThreshold: null,
       validityStart: null,
       validityEnd: null,
-      promotionNote: null
+      promotionNote: null,
+      cashbackRateReviewed: true,
+      amountThresholdReviewed: true,
+      validityStartReviewed: true,
+      validityEndReviewed: true
     });
     await expect(
       prisma.promotionDraft.findUnique({
@@ -291,7 +295,11 @@ describe('promotion import repository', () => {
           amountThreshold: true,
           validityStart: true,
           validityEnd: true,
-          promotionNote: true
+          promotionNote: true,
+          cashbackRateReviewed: true,
+          amountThresholdReviewed: true,
+          validityStartReviewed: true,
+          validityEndReviewed: true
         }
       })
     ).resolves.toMatchObject({
@@ -301,7 +309,59 @@ describe('promotion import repository', () => {
       amountThreshold: null,
       validityStart: null,
       validityEnd: null,
-      promotionNote: null
+      promotionNote: null,
+      cashbackRateReviewed: true,
+      amountThresholdReviewed: true,
+      validityStartReviewed: true,
+      validityEndReviewed: true
+    });
+  });
+
+  test('preserves explicit reviewed nulls when a pending draft is re-imported', async () => {
+    const { draft, reviewInput } = await createReviewedDraftFixture();
+    const run = await createImportRun('line-pay');
+    const input: ImportedPromotionDraft = {
+      importRunId: run.id,
+      source: 'line-pay',
+      sourceFingerprint: draft.sourceFingerprint,
+      sourceUrl: draft.sourceUrl,
+      sourceTitle: draft.sourceTitle,
+      sourceContent: draft.sourceContent,
+      fetchedAt: draft.fetchedAt
+    };
+    await updatePromotionDraft(draft.id, reviewInput);
+    await updatePromotionDraft(draft.id, {
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null
+    });
+
+    const nextRun = await createImportRun('line-pay');
+    const repeated = await upsertPendingDraft({
+      ...input,
+      importRunId: nextRun.id,
+      sourceContent: '8% cashback through October',
+      parsedCashbackRate: 0.08,
+      parsedAmountThreshold: 800,
+      parsedValidityStart: new Date('2026-10-01T00:00:00.000Z'),
+      parsedValidityEnd: new Date('2026-10-31T23:59:59.999Z')
+    });
+
+    expect(repeated).toMatchObject({
+      id: draft.id,
+      importRunId: nextRun.id,
+      sourceContent: '8% cashback through October',
+      parsedCashbackRate: 0.08,
+      parsedAmountThreshold: 800,
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null,
+      cashbackRateReviewed: true,
+      amountThresholdReviewed: true,
+      validityStartReviewed: true,
+      validityEndReviewed: true
     });
   });
 

@@ -10,6 +10,7 @@ const acceptanceMerchantSelect = document.getElementById('acceptance-merchant');
 const acceptedPaymentMethods = document.getElementById('accepted-payment-methods');
 const rewardRules = document.getElementById('reward-rules');
 const promotionDraftStatusFilter = document.getElementById('promotion-draft-status');
+const importRunsContainer = document.getElementById('import-runs');
 const promotionDraftsContainer = document.getElementById('promotion-drafts');
 const adminApiKeyInput = document.getElementById('admin-api-key');
 const connectAdminButton = document.getElementById('connect-admin');
@@ -20,6 +21,7 @@ const today = new Date().toISOString().slice(0, 10);
 let adminApiKey = '';
 let merchants = [];
 let paymentMethods = [];
+let importRuns = [];
 let promotionDrafts = [];
 let acceptedPaymentMethodCache = new Map();
 
@@ -116,6 +118,11 @@ async function fetchPaymentMethods() {
 
 async function fetchRewardRules() {
   const json = await requestJson('/api/admin/reward-rules');
+  return json.data || [];
+}
+
+async function fetchImportRuns() {
+  const json = await requestJson('/api/admin/import-runs');
   return json.data || [];
 }
 
@@ -246,6 +253,63 @@ function renderRewardRules(rules) {
   `;
 }
 
+function formatImportRunOutcome(run) {
+  if (run.status === 'completed') {
+    const draftCount = Number(run.draftCount) || 0;
+    return `Imported ${draftCount} draft${draftCount === 1 ? '' : 's'}.`;
+  }
+
+  if (run.status === 'failed') {
+    return run.errorMessage || 'Import failed without a recorded error message.';
+  }
+
+  return 'Import is still running.';
+}
+
+function renderImportRuns() {
+  if (!importRuns.length) {
+    importRunsContainer.innerHTML = '<p class="muted">No import runs recorded yet.</p>';
+    return;
+  }
+
+  importRunsContainer.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Started</th>
+            <th>Source</th>
+            <th>Status</th>
+            <th>Drafts</th>
+            <th>Completed</th>
+            <th>Outcome</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${importRuns.map((run) => `
+            <tr>
+              <td>${escapeHtml(new Date(run.startedAt).toLocaleString())}</td>
+              <td>${escapeHtml(run.source)}</td>
+              <td><span class="promotion-draft-status promotion-draft-status-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span></td>
+              <td>${escapeHtml(formatOptionalValue(run.draftCount, '0'))}</td>
+              <td>${escapeHtml(run.completedAt ? new Date(run.completedAt).toLocaleString() : '—')}</td>
+              <td class="promotion-import-run-outcome">${escapeHtml(formatImportRunOutcome(run))}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function getReviewedDraftValue(draft, reviewedField, reviewedValue, parsedValue) {
+  if (draft[reviewedField]) {
+    return draft[reviewedValue] ?? '';
+  }
+
+  return draft[reviewedValue] ?? draft[parsedValue] ?? '';
+}
+
 function renderDraftMerchantOptions(selectedMerchantId, readOnly) {
   const disabled = readOnly ? ' disabled' : '';
   const selectedValue = Number.isInteger(selectedMerchantId) ? String(selectedMerchantId) : '';
@@ -324,10 +388,30 @@ function renderPromotionDrafts() {
     const readOnly = draft.status !== 'pending_review';
     const merchantId = Number.isInteger(draft.merchantId) ? draft.merchantId : null;
     const paymentMethodId = Number.isInteger(draft.paymentMethodId) ? draft.paymentMethodId : null;
-    const cashbackRate = draft.cashbackRate ?? draft.parsedCashbackRate ?? '';
-    const amountThreshold = draft.amountThreshold ?? draft.parsedAmountThreshold ?? '';
-    const validityStart = draft.validityStart ?? draft.parsedValidityStart ?? '';
-    const validityEnd = draft.validityEnd ?? draft.parsedValidityEnd ?? '';
+    const cashbackRate = getReviewedDraftValue(
+      draft,
+      'cashbackRateReviewed',
+      'cashbackRate',
+      'parsedCashbackRate'
+    );
+    const amountThreshold = getReviewedDraftValue(
+      draft,
+      'amountThresholdReviewed',
+      'amountThreshold',
+      'parsedAmountThreshold'
+    );
+    const validityStart = getReviewedDraftValue(
+      draft,
+      'validityStartReviewed',
+      'validityStart',
+      'parsedValidityStart'
+    );
+    const validityEnd = getReviewedDraftValue(
+      draft,
+      'validityEndReviewed',
+      'validityEnd',
+      'parsedValidityEnd'
+    );
     const promotionNote = draft.promotionNote ?? '';
     const safeUrl = safeHttpsUrl(draft.sourceUrl);
     const sourceUrlMarkup = safeUrl
@@ -443,14 +527,16 @@ function setCatalogStatus(message, isError = false) {
 }
 
 async function refreshCatalog() {
-  const [merchantData, paymentMethodData, rewardRuleData, promotionDraftData] = await Promise.all([
+  const [merchantData, paymentMethodData, rewardRuleData, importRunData, promotionDraftData] = await Promise.all([
     fetchMerchants(),
     fetchPaymentMethods(),
     fetchRewardRules(),
+    fetchImportRuns(),
     fetchPromotionDrafts()
   ]);
   merchants = merchantData;
   paymentMethods = paymentMethodData;
+  importRuns = importRunData;
   promotionDrafts = promotionDraftData;
   acceptedPaymentMethodCache = new Map();
   renderMerchantOptions();
@@ -458,10 +544,11 @@ async function refreshCatalog() {
   renderMerchants();
   renderPaymentMethods();
   renderRewardRules(rewardRuleData);
+  renderImportRuns();
   await renderAcceptedPaymentMethods();
   await primePromotionDraftAcceptanceCache(promotionDrafts);
   renderPromotionDrafts();
-  setCatalogStatus(`Loaded ${merchants.length} merchants, ${paymentMethods.length} payment methods, ${rewardRuleData.length} reward rules, and ${promotionDrafts.length} imported promotion drafts.`);
+  setCatalogStatus(`Loaded ${merchants.length} merchants, ${paymentMethods.length} payment methods, ${rewardRuleData.length} reward rules, ${importRuns.length} import runs, and ${promotionDrafts.length} imported promotion drafts.`);
 }
 
 function getFormNumericValue(form, fieldName) {

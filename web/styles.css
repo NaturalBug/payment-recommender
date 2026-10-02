@@ -285,6 +285,43 @@ th, td {
   color: #c01048;
 }
 
+.promotion-draft-status-running {
+  background: #eef5fc;
+  color: #1976d2;
+}
+
+.promotion-draft-status-completed {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.promotion-draft-status-failed {
+  background: #fff1f3;
+  color: #c01048;
+}
+
+.promotion-import-runs {
+  margin-top: 16px;
+}
+
+.promotion-import-runs-heading {
+  margin-bottom: 12px;
+}
+
+.promotion-import-runs-heading h3,
+.promotion-import-runs-heading p {
+  margin: 0;
+}
+
+.promotion-import-runs-list {
+  margin-bottom: 20px;
+}
+
+.promotion-import-run-outcome {
+  min-width: 220px;
+  white-space: normal;
+}
+
 .promotion-draft-meta {
   display: grid;
   gap: 12px;

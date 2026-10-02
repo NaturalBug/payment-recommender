@@ -97,6 +97,10 @@ model PromotionDraft {
   parsedAmountThreshold Int?
   parsedValidityStart   DateTime?
   parsedValidityEnd     DateTime?
+  cashbackRateReviewed    Boolean @default(false)
+  amountThresholdReviewed Boolean @default(false)
+  validityStartReviewed   Boolean @default(false)
+  validityEndReviewed     Boolean @default(false)
 
   status String @default("pending_review")
 

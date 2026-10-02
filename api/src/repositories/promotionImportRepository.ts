@@ -36,6 +36,10 @@ type PromotionDraftRow = {
   parsedAmountThreshold: number | null;
   parsedValidityStart: Date | null;
   parsedValidityEnd: Date | null;
+  cashbackRateReviewed: boolean;
+  amountThresholdReviewed: boolean;
+  validityStartReviewed: boolean;
+  validityEndReviewed: boolean;
   status: string;
   merchantId: number | null;
   paymentMethodId: number | null;
@@ -91,6 +95,10 @@ const promotionDraftSelect = {
   parsedAmountThreshold: true,
   parsedValidityStart: true,
   parsedValidityEnd: true,
+  cashbackRateReviewed: true,
+  amountThresholdReviewed: true,
+  validityStartReviewed: true,
+  validityEndReviewed: true,
   status: true,
   merchantId: true,
   paymentMethodId: true,
@@ -152,6 +160,10 @@ function toPromotionDraftRecord(row: PromotionDraftRow): PromotionDraftRecord {
     parsedAmountThreshold: row.parsedAmountThreshold,
     parsedValidityStart: row.parsedValidityStart,
     parsedValidityEnd: row.parsedValidityEnd,
+    cashbackRateReviewed: row.cashbackRateReviewed,
+    amountThresholdReviewed: row.amountThresholdReviewed,
+    validityStartReviewed: row.validityStartReviewed,
+    validityEndReviewed: row.validityEndReviewed,
     status: row.status as PromotionDraftStatus,
     merchantId: row.merchantId,
     paymentMethodId: row.paymentMethodId,
@@ -442,15 +454,28 @@ export async function updatePromotionDraft(
   input: PromotionDraftReviewInput
 ): Promise<PromotionDraftRecord | null> {
   const data: Prisma.PromotionDraftUncheckedUpdateInput = {
-    rejectionReason: null
+    rejectionReason: null,
+    reviewedAt: new Date()
   };
 
   if (input.merchantId !== undefined) data.merchantId = input.merchantId;
   if (input.paymentMethodId !== undefined) data.paymentMethodId = input.paymentMethodId;
-  if (input.cashbackRate !== undefined) data.cashbackRate = input.cashbackRate;
-  if (input.amountThreshold !== undefined) data.amountThreshold = input.amountThreshold;
-  if (input.validityStart !== undefined) data.validityStart = input.validityStart;
-  if (input.validityEnd !== undefined) data.validityEnd = input.validityEnd;
+  if (input.cashbackRate !== undefined) {
+    data.cashbackRate = input.cashbackRate;
+    data.cashbackRateReviewed = true;
+  }
+  if (input.amountThreshold !== undefined) {
+    data.amountThreshold = input.amountThreshold;
+    data.amountThresholdReviewed = true;
+  }
+  if (input.validityStart !== undefined) {
+    data.validityStart = input.validityStart;
+    data.validityStartReviewed = true;
+  }
+  if (input.validityEnd !== undefined) {
+    data.validityEnd = input.validityEnd;
+    data.validityEndReviewed = true;
+  }
   if (input.promotionNote !== undefined) data.promotionNote = input.promotionNote;
 
   try {

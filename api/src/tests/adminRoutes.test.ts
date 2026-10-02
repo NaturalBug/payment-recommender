@@ -494,6 +494,10 @@ describe('admin routes', () => {
         sourceContent: expect.any(String),
         parsedCashbackRate: 0.04,
         parsedAmountThreshold: 300,
+        cashbackRateReviewed: false,
+        amountThresholdReviewed: false,
+        validityStartReviewed: false,
+        validityEndReviewed: false,
         status: 'pending_review'
       })
     ]);
@@ -635,6 +639,16 @@ describe('admin routes', () => {
     const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
     const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
 
+    await prisma.promotionDraft.update({
+      where: { id: draft.id },
+      data: {
+        parsedCashbackRate: 0.04,
+        parsedAmountThreshold: 300,
+        parsedValidityStart: new Date('2026-09-01T00:00:00.000Z'),
+        parsedValidityEnd: new Date('2026-09-30T23:59:59.999Z')
+      }
+    });
+
     await prisma.merchantPaymentAcceptance.create({
       data: { merchantId: merchant.id, paymentMethodId: paymentMethod.id }
     });
@@ -665,10 +679,29 @@ describe('admin routes', () => {
     const publish = await request(app)
       .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
       .set('X-Admin-API-Key', 'test-admin-key');
+    const refreshed = await request(app)
+      .get('/api/admin/promotion-drafts')
+      .set('X-Admin-API-Key', 'test-admin-key');
 
     expect(cleared.status).toBe(200);
     expect(publish.status).toBe(400);
     expect(publish.body.message).toContain('missing reviewed');
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data).toEqual([
+      expect.objectContaining({
+        id: draft.id,
+        parsedCashbackRate: 0.04,
+        parsedAmountThreshold: 300,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null,
+        cashbackRateReviewed: true,
+        amountThresholdReviewed: true,
+        validityStartReviewed: true,
+        validityEndReviewed: true
+      })
+    ]);
     await expect(prisma.rewardRule.count()).resolves.toBe(0);
     await expect(listPromotionDrafts('pending_review')).resolves.toEqual([
       expect.objectContaining({
@@ -679,6 +712,10 @@ describe('admin routes', () => {
         amountThreshold: null,
         validityStart: null,
         validityEnd: null,
+        cashbackRateReviewed: true,
+        amountThresholdReviewed: true,
+        validityStartReviewed: true,
+        validityEndReviewed: true,
         rewardRuleId: null,
         status: 'pending_review'
       })

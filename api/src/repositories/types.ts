@@ -89,6 +89,10 @@ export type PromotionDraftRecord = {
   parsedAmountThreshold?: number | null;
   parsedValidityStart?: Date | null;
   parsedValidityEnd?: Date | null;
+  cashbackRateReviewed: boolean;
+  amountThresholdReviewed: boolean;
+  validityStartReviewed: boolean;
+  validityEndReviewed: boolean;
   status: PromotionDraftStatus;
   merchantId?: number | null;
   paymentMethodId?: number | null;
