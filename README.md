@@ -64,6 +64,60 @@ you must enter it again after reloading the page. Click **Connect** after
 entering the key; the catalog and management forms remain disabled until the
 key is verified successfully.
 
+## Promotion import beta
+
+The first manual-import beta supports exactly these official public sources:
+
+- `line-pay`
+- `jko-pay`
+- `ipass-money`
+
+Initialize the local database with the existing setup commands before importing:
+
+```bash
+cd api
+cp .env.example .env
+npx prisma generate
+npx prisma db push
+npm run db:seed
+```
+
+Run one source at a time against that same local database:
+
+```bash
+cd api
+npm run import:promotions -- --source line-pay
+npm run import:promotions -- --source jko-pay
+npm run import:promotions -- --source ipass-money
+```
+
+Each successful run creates an `ImportRun` record plus reviewable
+`PromotionDraft` entries. Drafts do not affect `/api/recommendations`, and
+they do not create `RewardRule` records automatically. Only a successful
+manual review and publish action creates a `RewardRule` that can affect public
+recommendations.
+
+Import failures exit non-zero and are recorded on the related import run. Only
+allowed official public pages are supported in this phase. Source availability,
+page structure, and published terms can change over time, so a source that
+worked previously may later fail or become unsupported if it requires access
+that is no longer publicly permitted.
+
+### Reviewing and publishing imported promotions
+
+1. Start the API and web UI, then open `web/admin.html` in the browser flow
+   described above and connect with `ADMIN_API_KEY`.
+2. Use the **Imported promotions** section to inspect recent import runs and
+   pending drafts, including the official source URL, captured source text, and
+   parsed values.
+3. If the merchant or payment method does not already exist, add it with the
+   existing catalog controls. If the merchant does not accept the selected
+   payment method yet, add that acceptance mapping before publishing.
+4. Save the reviewed merchant, payment method, cashback rate, threshold,
+   validity dates, and optional note on the draft.
+5. Publish the draft to create a normal `RewardRule`, or reject it with a
+   reason to keep it out of recommendations.
+
 ## Test isolation
 
 Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. For a completely clean setup, remove stale database files before reinitializing:
