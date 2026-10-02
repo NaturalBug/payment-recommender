@@ -251,13 +251,16 @@ function toDraftUpdateData(input: ImportedPromotionDraft): Prisma.PromotionDraft
   };
 }
 
-function mapPrismaError(error: unknown): never {
+function mapPrismaError(error: unknown, foreignKeyConflictMessage?: string): never {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === 'P2002') {
       throw new RepositoryConflictError('reward rule conflicts with an existing record');
     }
 
     if (error.code === 'P2003') {
+      if (foreignKeyConflictMessage) {
+        throw new RepositoryConflictError(foreignKeyConflictMessage);
+      }
       throw new RepositoryValidationError('merchant or payment method is invalid');
     }
 
@@ -527,11 +530,11 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
       ]);
 
       if (!merchant || !paymentMethod) {
-        throw new RepositoryValidationError('merchant or payment method is invalid');
+        throw new RepositoryConflictError('merchant or payment method is no longer available');
       }
 
       if (!acceptance) {
-        throw new RepositoryValidationError('payment method is not accepted by this merchant');
+        throw new RepositoryConflictError('payment method is not accepted by this merchant');
       }
 
       const rewardRule = await transaction.rewardRule.create({
@@ -564,6 +567,6 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
       };
     });
   } catch (error) {
-    mapPrismaError(error);
+    mapPrismaError(error, 'promotion catalog relationships changed; refresh the draft');
   }
 }

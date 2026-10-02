@@ -38,8 +38,11 @@ import {
   RepositoryValidationError
 } from '../repositories/errors';
 import type {
+  ImportRunRecord,
+  PromotionDraftRecord,
   PromotionDraftReviewInput,
-  PromotionDraftStatus
+  PromotionDraftStatus,
+  RewardRuleRecord
 } from '../repositories/types';
 
 const router = Router();
@@ -53,6 +56,41 @@ const promotionDraftReviewFields = [
   'validityEnd',
   'promotionNote'
 ] as const;
+
+function serializeDateOnly(value: Date | null | undefined): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === null ? null : value.toISOString().slice(0, 10);
+}
+
+function serializeImportRun(run: ImportRunRecord) {
+  return {
+    ...run,
+    startedAt: run.startedAt.toISOString(),
+    completedAt: run.completedAt?.toISOString() ?? null
+  };
+}
+
+function serializePromotionDraft(draft: PromotionDraftRecord) {
+  return {
+    ...draft,
+    fetchedAt: draft.fetchedAt.toISOString(),
+    parsedValidityStart: serializeDateOnly(draft.parsedValidityStart),
+    parsedValidityEnd: serializeDateOnly(draft.parsedValidityEnd),
+    validityStart: serializeDateOnly(draft.validityStart),
+    validityEnd: serializeDateOnly(draft.validityEnd),
+    reviewedAt: draft.reviewedAt?.toISOString() ?? null
+  };
+}
+
+function serializeRewardRule(rule: RewardRuleRecord) {
+  return {
+    ...rule,
+    validityStart: rule.validityStart.toISOString().slice(0, 10),
+    validityEnd: rule.validityEnd.toISOString().slice(0, 10)
+  };
+}
 
 function parseOptionalDate(value: unknown): Date {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -588,7 +626,7 @@ router.delete('/merchants/:merchantId/payment-methods/:paymentMethodId', async (
 router.get('/import-runs', async (_req, res) => {
   try {
     const runs = await listImportRuns();
-    return res.json({ success: true, data: runs });
+    return res.json({ success: true, data: runs.map(serializeImportRun) });
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -608,7 +646,7 @@ router.get('/promotion-drafts', async (req, res) => {
 
   try {
     const drafts = await listPromotionDrafts(rawStatus as PromotionDraftStatus | undefined);
-    return res.json({ success: true, data: drafts });
+    return res.json({ success: true, data: drafts.map(serializePromotionDraft) });
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -634,7 +672,7 @@ router.patch('/promotion-drafts/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'promotion draft not found' });
     }
 
-    return res.json({ success: true, data: updated });
+    return res.json({ success: true, data: serializePromotionDraft(updated) });
   } catch (error) {
     if (error instanceof RepositoryConflictError) {
       return res.status(409).json({ success: false, message: error.message });
@@ -660,7 +698,10 @@ router.post('/promotion-drafts/:id/publish', async (req, res) => {
     const result = await publishPromotionDraft(id);
     return res.status(201).json({
       success: true,
-      data: { ...result.draft, rewardRule: result.rewardRule }
+      data: {
+        ...serializePromotionDraft(result.draft),
+        rewardRule: serializeRewardRule(result.rewardRule)
+      }
     });
   } catch (error) {
     if (error instanceof RepositoryConflictError) {
@@ -695,7 +736,7 @@ router.post('/promotion-drafts/:id/reject', async (req, res) => {
       return res.status(404).json({ success: false, message: 'promotion draft not found' });
     }
 
-    return res.json({ success: true, data: rejected });
+    return res.json({ success: true, data: serializePromotionDraft(rejected) });
   } catch (error) {
     if (error instanceof RepositoryConflictError) {
       return res.status(409).json({ success: false, message: error.message });

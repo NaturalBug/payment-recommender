@@ -541,7 +541,9 @@ describe('admin routes', () => {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
       cashbackRate: 0.05,
-      amountThreshold: 500
+      amountThreshold: 500,
+      validityStart: '2026-09-01',
+      validityEnd: '2026-09-30'
     });
   });
 
@@ -605,7 +607,13 @@ describe('admin routes', () => {
     expect(response.body.data).toMatchObject({
       status: 'published',
       rewardRuleId: expect.any(Number),
-      paymentMethodId: paymentMethod.id
+      paymentMethodId: paymentMethod.id,
+      validityStart: '2026-09-01',
+      validityEnd: '2026-09-30',
+      rewardRule: expect.objectContaining({
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      })
     });
     await expect(prisma.rewardRule.count({ where: { id: response.body.data.rewardRuleId } })).resolves.toBe(1);
   });
@@ -627,7 +635,7 @@ describe('admin routes', () => {
       .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
       .set('X-Admin-API-Key', 'test-admin-key');
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
     expect(response.body.message).toContain('not accepted');
     await expect(listPromotionDrafts('pending_review')).resolves.toHaveLength(1);
   });

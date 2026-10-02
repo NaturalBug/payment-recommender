@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { RepositoryConflictError, RepositoryValidationError } from '../repositories/errors';
 import { addAcceptance } from '../repositories/merchantPaymentAcceptanceRepository';
@@ -311,6 +311,43 @@ describe('promotion import repository', () => {
     ).resolves.toMatchObject({ promotionNote: 'Verified manually' });
   });
 
+  test('maps a publish-time foreign-key race to a catalog conflict', async () => {
+    const { draft, reviewInput } = await createReviewedDraftFixture();
+    await updatePromotionDraft(draft.id, reviewInput);
+    const foreignKeyError = new Prisma.PrismaClientKnownRequestError('foreign key violation', {
+      code: 'P2003',
+      clientVersion: Prisma.prismaVersion.client
+    });
+    const transactionSpy = jest.spyOn(prisma, '$transaction');
+    transactionSpy.mockImplementationOnce((async (
+      callback: (transaction: Prisma.TransactionClient) => Promise<unknown>
+    ) => callback({
+      promotionDraft: prisma.promotionDraft,
+      merchant: prisma.merchant,
+      paymentMethod: prisma.paymentMethod,
+      merchantPaymentAcceptance: prisma.merchantPaymentAcceptance,
+      rewardRule: {
+        create: jest.fn().mockRejectedValue(foreignKeyError)
+      }
+    } as unknown as Prisma.TransactionClient)) as never);
+
+    try {
+      await expect(publishPromotionDraft(draft.id)).rejects.toMatchObject({
+        constructor: RepositoryConflictError,
+        message: 'promotion catalog relationships changed; refresh the draft'
+      });
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    await expect(
+      prisma.promotionDraft.findUnique({
+        where: { id: draft.id },
+        select: { status: true, rewardRuleId: true }
+      })
+    ).resolves.toMatchObject({ status: 'pending_review', rewardRuleId: null });
+  });
+
   test('rejects stale review updates after a concurrent publish', async () => {
     const { draft, reviewInput } = await createReviewedDraftFixture();
     await updatePromotionDraft(draft.id, reviewInput);
@@ -439,7 +476,7 @@ describe('promotion import repository', () => {
     await prisma.$executeRawUnsafe(`UPDATE "PromotionDraft" SET "merchantId" = 999999 WHERE "id" = ${draft.id}`);
     await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
 
-    await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryValidationError);
+    await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
     await expect(
       prisma.promotionDraft.findUnique({
         where: { id: draft.id },
@@ -462,7 +499,7 @@ describe('promotion import repository', () => {
       validityEnd: new Date('2026-09-30T00:00:00.000Z')
     });
 
-    await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryValidationError);
+    await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
     await expect(
       prisma.promotionDraft.findUnique({
         where: { id: draft.id },
