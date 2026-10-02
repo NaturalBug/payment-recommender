@@ -67,12 +67,12 @@ export type ImportedPromotionDraft = {
 };
 
 export type PromotionDraftReviewInput = {
-  merchantId?: number;
-  paymentMethodId?: number;
-  cashbackRate?: number;
-  amountThreshold?: number;
-  validityStart?: Date;
-  validityEnd?: Date;
+  merchantId?: number | null;
+  paymentMethodId?: number | null;
+  cashbackRate?: number | null;
+  amountThreshold?: number | null;
+  validityStart?: Date | null;
+  validityEnd?: Date | null;
   promotionNote?: string | null;
 };
 

@@ -257,6 +257,54 @@ describe('promotion import repository', () => {
     await expect(updatePromotionDraft(999999, reviewInput)).resolves.toBeNull();
   });
 
+  test('clears nullable reviewed fields when explicit nulls are saved', async () => {
+    const { draft, reviewInput } = await createReviewedDraftFixture();
+    await updatePromotionDraft(draft.id, reviewInput);
+
+    const cleared = await updatePromotionDraft(draft.id, {
+      merchantId: null,
+      paymentMethodId: null,
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null,
+      promotionNote: null
+    });
+
+    expect(cleared).toMatchObject({
+      id: draft.id,
+      merchantId: null,
+      paymentMethodId: null,
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null,
+      promotionNote: null
+    });
+    await expect(
+      prisma.promotionDraft.findUnique({
+        where: { id: draft.id },
+        select: {
+          merchantId: true,
+          paymentMethodId: true,
+          cashbackRate: true,
+          amountThreshold: true,
+          validityStart: true,
+          validityEnd: true,
+          promotionNote: true
+        }
+      })
+    ).resolves.toMatchObject({
+      merchantId: null,
+      paymentMethodId: null,
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null,
+      promotionNote: null
+    });
+  });
+
   test('rejects a draft only with a non-empty reason and records review metadata', async () => {
     const { draft } = await createDraftFixture();
 

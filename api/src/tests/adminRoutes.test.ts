@@ -564,6 +564,50 @@ describe('admin routes', () => {
     });
   });
 
+  test('clears nullable reviewed fields when explicit nulls are sent', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+    await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: merchant.id,
+        paymentMethodId: paymentMethod.id,
+        cashbackRate: 0.05,
+        amountThreshold: 500,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30',
+        promotionNote: 'Verified official offer'
+      });
+
+    const response = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: null,
+        paymentMethodId: null,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null,
+        promotionNote: null
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      id: draft.id,
+      merchantId: null,
+      paymentMethodId: null,
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null,
+      promotionNote: null
+    });
+  });
+
   test('rejects invalid review fields and empty updates', async () => {
     const draft = await createPendingDraft();
     const key = { 'X-Admin-API-Key': 'test-admin-key' };
@@ -579,7 +623,66 @@ describe('admin routes', () => {
 
     expect(empty.status).toBe(400);
     expect(invalid.status).toBe(400);
-    expect(nullCashbackRate.status).toBe(400);
+    expect(nullCashbackRate.status).toBe(200);
+    expect(nullCashbackRate.body.data).toMatchObject({
+      id: draft.id,
+      cashbackRate: null
+    });
+  });
+
+  test('does not publish stale reviewed values after they are cleared', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: merchant.id, paymentMethodId: paymentMethod.id }
+    });
+
+    await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: merchant.id,
+        paymentMethodId: paymentMethod.id,
+        cashbackRate: 0.05,
+        amountThreshold: 500,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      });
+
+    const cleared = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: null,
+        paymentMethodId: null,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null
+      });
+    const publish = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(cleared.status).toBe(200);
+    expect(publish.status).toBe(400);
+    expect(publish.body.message).toContain('missing reviewed');
+    await expect(prisma.rewardRule.count()).resolves.toBe(0);
+    await expect(listPromotionDrafts('pending_review')).resolves.toEqual([
+      expect.objectContaining({
+        id: draft.id,
+        merchantId: null,
+        paymentMethodId: null,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null,
+        rewardRuleId: null,
+        status: 'pending_review'
+      })
+    ]);
   });
 
   test('publishes a reviewed promotion draft through the protected API', async () => {

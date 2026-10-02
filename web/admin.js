@@ -480,27 +480,14 @@ function collectPromotionDraftReviewPayload(form) {
   const promotionNote = form.elements.namedItem('promotionNote').value.trim();
 
   const payload = {
+    merchantId,
+    paymentMethodId,
+    cashbackRate: cashbackRateRaw ? Number(cashbackRateRaw) : null,
+    amountThreshold: amountThresholdRaw ? Number(amountThresholdRaw) : null,
+    validityStart: validityStart || null,
+    validityEnd: validityEnd || null,
     promotionNote: promotionNote || null
   };
-
-  if (merchantId !== null) {
-    payload.merchantId = merchantId;
-  }
-  if (paymentMethodId !== null) {
-    payload.paymentMethodId = paymentMethodId;
-  }
-  if (cashbackRateRaw) {
-    payload.cashbackRate = Number(cashbackRateRaw);
-  }
-  if (amountThresholdRaw) {
-    payload.amountThreshold = Number(amountThresholdRaw);
-  }
-  if (validityStart) {
-    payload.validityStart = validityStart;
-  }
-  if (validityEnd) {
-    payload.validityEnd = validityEnd;
-  }
 
   return payload;
 }

@@ -121,6 +121,10 @@ function parseNumericValue(value: unknown, field: string): number {
   return parsed;
 }
 
+function hasOwn(values: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(values, key);
+}
+
 function parsePromotionDraftReviewPatch(
   body: unknown,
   existing: NonNullable<Awaited<ReturnType<typeof findPromotionDraft>>>
@@ -138,7 +142,11 @@ function parsePromotionDraftReviewPatch(
   const patch: PromotionDraftReviewInput = {};
 
   for (const field of ['merchantId', 'paymentMethodId'] as const) {
-    if (values[field] === undefined) continue;
+    if (!hasOwn(values, field)) continue;
+    if (values[field] === null) {
+      patch[field] = null;
+      continue;
+    }
     const parsed = parseNumericValue(values[field], field);
     if (!Number.isInteger(parsed) || parsed <= 0) {
       throw new RepositoryValidationError(`${field} must be a positive integer`);
@@ -146,29 +154,41 @@ function parsePromotionDraftReviewPatch(
     patch[field] = parsed;
   }
 
-  if (values.cashbackRate !== undefined) {
-    const cashbackRate = parseNumericValue(values.cashbackRate, 'cashbackRate');
-    if (!Number.isFinite(cashbackRate) || cashbackRate < 0) {
-      throw new RepositoryValidationError('cashbackRate must be a non-negative number');
+  if (hasOwn(values, 'cashbackRate')) {
+    if (values.cashbackRate === null) {
+      patch.cashbackRate = null;
+    } else {
+      const cashbackRate = parseNumericValue(values.cashbackRate, 'cashbackRate');
+      if (!Number.isFinite(cashbackRate) || cashbackRate < 0) {
+        throw new RepositoryValidationError('cashbackRate must be a non-negative number');
+      }
+      patch.cashbackRate = cashbackRate;
     }
-    patch.cashbackRate = cashbackRate;
   }
 
-  if (values.amountThreshold !== undefined) {
-    const amountThreshold = parseNumericValue(values.amountThreshold, 'amountThreshold');
-    if (!Number.isInteger(amountThreshold) || amountThreshold < 0) {
-      throw new RepositoryValidationError('amountThreshold must be a non-negative integer');
+  if (hasOwn(values, 'amountThreshold')) {
+    if (values.amountThreshold === null) {
+      patch.amountThreshold = null;
+    } else {
+      const amountThreshold = parseNumericValue(values.amountThreshold, 'amountThreshold');
+      if (!Number.isInteger(amountThreshold) || amountThreshold < 0) {
+        throw new RepositoryValidationError('amountThreshold must be a non-negative integer');
+      }
+      patch.amountThreshold = amountThreshold;
     }
-    patch.amountThreshold = amountThreshold;
   }
 
-  if (values.validityStart !== undefined) {
-    patch.validityStart = parseOptionalDate(values.validityStart);
+  if (hasOwn(values, 'validityStart')) {
+    patch.validityStart = values.validityStart === null ? null : parseOptionalDate(values.validityStart);
   }
 
-  if (values.validityEnd !== undefined) {
-    const endDate = parseOptionalDate(values.validityEnd);
-    patch.validityEnd = new Date(`${endDate.toISOString().slice(0, 10)}T23:59:59.999Z`);
+  if (hasOwn(values, 'validityEnd')) {
+    if (values.validityEnd === null) {
+      patch.validityEnd = null;
+    } else {
+      const endDate = parseOptionalDate(values.validityEnd);
+      patch.validityEnd = new Date(`${endDate.toISOString().slice(0, 10)}T23:59:59.999Z`);
+    }
   }
 
   if (values.promotionNote !== undefined) {
@@ -181,8 +201,12 @@ function parsePromotionDraftReviewPatch(
     patch.promotionNote = typeof values.promotionNote === 'string' ? values.promotionNote.trim() || null : null;
   }
 
-  const start = patch.validityStart ?? existing.validityStart ?? existing.parsedValidityStart ?? null;
-  const end = patch.validityEnd ?? existing.validityEnd ?? existing.parsedValidityEnd ?? null;
+  const start = hasOwn(values, 'validityStart')
+    ? patch.validityStart ?? null
+    : existing.validityStart ?? existing.parsedValidityStart ?? null;
+  const end = hasOwn(values, 'validityEnd')
+    ? patch.validityEnd ?? null
+    : existing.validityEnd ?? existing.parsedValidityEnd ?? null;
   if (start && end && end < start) {
     throw new RepositoryValidationError('validityEnd must be on or after validityStart');
   }
