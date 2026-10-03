@@ -9,8 +9,10 @@ const testDatabaseUrl =
   process.env.DATABASE_URL ?? `file:${path.resolve(__dirname, `../../prisma/test-${workerId}.db`)}`;
 
 async function resetManagedRows(prisma: PrismaClient) {
+  await prisma.promotionDraft.deleteMany();
   await prisma.rewardRule.deleteMany();
   await prisma.merchantPaymentAcceptance.deleteMany();
+  await prisma.importRun.deleteMany();
   await prisma.merchant.deleteMany();
   await prisma.paymentMethod.deleteMany();
 }

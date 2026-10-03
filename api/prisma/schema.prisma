@@ -19,6 +19,7 @@ model Merchant {
   notes     String?
 
   acceptedMethods MerchantPaymentAcceptance[]
+  promotionDrafts PromotionDraft[]
   rewardRules     RewardRule[]
 }
 
@@ -29,6 +30,7 @@ model PaymentMethod {
   type           String
 
   acceptedBy MerchantPaymentAcceptance[]
+  promotionDrafts PromotionDraft[]
   rewardRules RewardRule[]
 }
 
@@ -62,4 +64,61 @@ model RewardRule {
   validityStart   DateTime
   validityEnd     DateTime
   promotionNote   String?
+  promotionDraft  PromotionDraft?
+}
+
+model ImportRun {
+  id Int @id @default(autoincrement())
+
+  source       String
+  status       String
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  errorMessage String?
+  draftCount   Int      @default(0)
+
+  drafts PromotionDraft[]
+}
+
+model PromotionDraft {
+  id Int @id @default(autoincrement())
+
+  importRun   ImportRun @relation(fields: [importRunId], references: [id], onDelete: Restrict)
+  importRunId Int
+
+  source            String
+  sourceFingerprint String   @unique
+  sourceUrl         String
+  sourceTitle       String
+  sourceContent     String
+  fetchedAt         DateTime
+
+  parsedCashbackRate    Decimal?
+  parsedAmountThreshold Int?
+  parsedValidityStart   DateTime?
+  parsedValidityEnd     DateTime?
+  cashbackRateReviewed    Boolean @default(false)
+  amountThresholdReviewed Boolean @default(false)
+  validityStartReviewed   Boolean @default(false)
+  validityEndReviewed     Boolean @default(false)
+
+  status String @default("pending_review")
+
+  merchant   Merchant? @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  merchantId Int?
+
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  paymentMethodId Int?
+
+  cashbackRate    Decimal?
+  amountThreshold Int?
+  validityStart   DateTime?
+  validityEnd     DateTime?
+  promotionNote   String?
+
+  rewardRule   RewardRule? @relation(fields: [rewardRuleId], references: [id], onDelete: Restrict)
+  rewardRuleId Int?        @unique
+
+  reviewedAt      DateTime?
+  rejectionReason String?
 }
