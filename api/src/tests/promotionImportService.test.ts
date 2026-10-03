@@ -91,6 +91,37 @@ describe('promotion import service', () => {
     expect(results[0].sourceContent).not.toHaveLength(0);
   });
 
+  test('decodes HTML entities only once in captured promotion text', async () => {
+    const fetchPage = jest.fn().mockResolvedValue(`
+      <section>
+        <a class="activity-card" href="/portal/tw/about/promotions/literal-markup">
+          <h2>Literal &amp;lt;b&amp;gt; text in promotion title</h2>
+          <p>活動期間 2026/09/01 - 2026/09/30，享 5% 回饋。</p>
+        </a>
+      </section>
+    `);
+
+    const [result] = await createLinePayImporter(fetchPage).import();
+
+    expect(result.sourceTitle).toBe('Literal &lt;b&gt; text in promotion title');
+  });
+
+  test('removes script content when closing tags contain whitespace', async () => {
+    const fetchPage = jest.fn().mockResolvedValue(`
+      <section>
+        <a class="activity-card" href="/portal/tw/about/promotions/no-script-text">
+          <h2>Promotion title with enough ordinary visible text</h2>
+          <p>活動期間 2026/09/01 - 2026/09/30，享 5% 回饋。</p>
+          <script>secretScriptMarker()</script >
+        </a>
+      </section>
+    `);
+
+    const [result] = await createLinePayImporter(fetchPage).import();
+
+    expect(result.sourceContent).not.toContain('secretScriptMarker');
+  });
+
   test('does not read redirected non-official content when fetching official pages', async () => {
     const originalFetch = global.fetch;
     const text = jest.fn().mockResolvedValue('<html>off-platform content</html>');

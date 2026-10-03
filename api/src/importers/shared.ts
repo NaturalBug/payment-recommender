@@ -10,19 +10,22 @@ type SourceImporterConfig = {
 const officialUserAgent = 'payment-recommender-importer/1.0 (+https://github.com/)';
 
 function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>');
+  const entities: Record<string, string> = {
+    '&nbsp;': ' ',
+    '&amp;': '&',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&lt;': '<',
+    '&gt;': '>'
+  };
+
+  return value.replace(/&(?:nbsp|amp|quot|#39|lt|gt);/gi, (entity) => entities[entity.toLowerCase()]);
 }
 
 function stripTags(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|section|article|li|h[1-6])>/gi, '\n')
     .replace(/<[^>]+>/g, ' ');
