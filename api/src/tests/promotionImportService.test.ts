@@ -122,6 +122,23 @@ describe('promotion import service', () => {
     expect(result.sourceContent).not.toContain('secretScriptMarker');
   });
 
+  test('removes script content when closing tags contain ignored end-tag text', async () => {
+    const fetchPage = jest.fn().mockResolvedValue(`
+      <section>
+        <a class="activity-card" href="/portal/tw/about/promotions/no-script-end-tag-text">
+          <h2>Promotion title with enough ordinary visible text</h2>
+          <p>活動期間 2026/09/01 - 2026/09/30，享 5% 回饋。</p>
+          <script>secretScriptMarker()</script
+            bar>
+        </a>
+      </section>
+    `);
+
+    const [result] = await createLinePayImporter(fetchPage).import();
+
+    expect(result.sourceContent).not.toContain('secretScriptMarker');
+  });
+
   test('does not read redirected non-official content when fetching official pages', async () => {
     const originalFetch = global.fetch;
     const text = jest.fn().mockResolvedValue('<html>off-platform content</html>');
