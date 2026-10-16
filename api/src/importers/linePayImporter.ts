@@ -4,7 +4,8 @@ import type { FetchPage, PromotionSourceAdapter } from './types';
 const linePayConfig = {
   source: 'line-pay' as const,
   listUrl: 'https://pay.line.me/portal/tw/about/promotions',
-  allowedHostnames: ['pay.line.me']
+  allowedHostnames: ['pay.line.me'],
+  allowedPathPrefixes: ['/portal/tw/about/promotions/']
 };
 
 export function createLinePayImporter(fetchPage: FetchPage = fetchOfficialPage): PromotionSourceAdapter {

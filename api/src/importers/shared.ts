@@ -5,6 +5,7 @@ type SourceImporterConfig = {
   source: ImportSource;
   listUrl: string;
   allowedHostnames: string[];
+  allowedPathPrefixes?: string[];
 };
 
 const officialUserAgent = 'payment-recommender-importer/1.0 (+https://github.com/)';
@@ -109,14 +110,25 @@ function buildOfficialUrl(url: string, allowedHostnames: string[]): URL {
   return parsedUrl;
 }
 
-function resolveOfficialCardUrl(listUrl: string, href: string, allowedHostnames: string[]): URL | null {
+function resolveOfficialCardUrl(
+  listUrl: string,
+  href: string,
+  config: SourceImporterConfig
+): URL | null {
   if (!href || href.startsWith('#') || /^javascript:/i.test(href)) {
     return null;
   }
 
   const resolvedUrl = new URL(href, listUrl);
 
-  if (resolvedUrl.protocol !== 'https:' || !allowedHostnames.includes(resolvedUrl.hostname)) {
+  const hasAllowedPath = !config.allowedPathPrefixes ||
+    config.allowedPathPrefixes.some((prefix) => resolvedUrl.pathname.startsWith(prefix));
+
+  if (
+    resolvedUrl.protocol !== 'https:' ||
+    !config.allowedHostnames.includes(resolvedUrl.hostname) ||
+    !hasAllowedPath
+  ) {
     return null;
   }
 
@@ -148,7 +160,7 @@ function toPromotionCandidate(
   listUrl: string,
   card: { href: string; innerHtml: string; text: string }
 ): ImportedPromotionCandidate | null {
-  const sourceUrl = resolveOfficialCardUrl(listUrl, card.href, config.allowedHostnames);
+  const sourceUrl = resolveOfficialCardUrl(listUrl, card.href, config);
 
   if (!sourceUrl) {
     return null;

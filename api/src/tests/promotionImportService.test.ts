@@ -91,6 +91,26 @@ describe('promotion import service', () => {
     expect(results[0].sourceContent).not.toHaveLength(0);
   });
 
+  test('does not import LINE Pay footer links as promotion drafts', async () => {
+    const fetchPage = jest.fn().mockResolvedValue(`
+      <section>
+        <a class="activity-card" href="/portal/tw/about/promotions/summer-fest">
+          <h2>夏日回饋最高 5%</h2>
+          <p>活動期間 2026/09/01 - 2026/09/30，單筆滿 NT$300 享 5% 回饋。</p>
+        </a>
+      </section>
+      <footer>
+        <a href="/portal/tw-lpm"><span>LINE Pay Money</span></a>
+      </footer>
+    `);
+
+    const results = await createLinePayImporter(fetchPage).import();
+
+    expect(results.map(({ sourceUrl }) => sourceUrl)).toEqual([
+      'https://pay.line.me/portal/tw/about/promotions/summer-fest'
+    ]);
+  });
+
   test('decodes HTML entities only once in captured promotion text', async () => {
     const fetchPage = jest.fn().mockResolvedValue(`
       <section>
