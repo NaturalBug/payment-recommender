@@ -18,3 +18,10 @@ export class RepositoryValidationError extends Error {
     this.name = 'RepositoryValidationError';
   }
 }
+
+export class RepositoryNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RepositoryNotFoundError';
+  }
+}

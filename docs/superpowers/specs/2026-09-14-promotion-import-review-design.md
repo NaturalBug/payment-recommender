@@ -5,7 +5,9 @@
 Collect promotion information from official LINE Pay, JKO Pay, and iPASS MONEY
 pages without allowing unreviewed extraction results to affect payment
 recommendations. An administrator reviews each imported promotion and publishes
-only verified rules into the existing catalog.
+only verified promotions into the existing catalog. Published benefits support
+percentage cashback or fixed cash discounts, Merchant- or Outlet-origin scope,
+reviewer-authored user-facing terms, and the official promotion URL.
 
 ## Scope
 
@@ -15,8 +17,8 @@ This feature adds:
 - A command-line import job that creates auditable import runs and promotion
   drafts.
 - Admin APIs and UI for reviewing, rejecting, and publishing drafts.
-- A publish path that creates a regular `RewardRule` only after its merchant,
-  payment method, and acceptance mapping have been verified.
+- A publish path that creates a canonical `Promotion` with structured scope,
+  included branches, exclusions, payment methods, and source attribution.
 
 This feature does not add automated publishing, account authentication, browser
 automation, or generic extraction based on LLM output.
@@ -44,7 +46,7 @@ Official source page
   -> normalized candidate promotion
   -> ImportRun + PromotionDraft
   -> Admin review
-  -> RewardRule
+  -> Promotion
   -> public recommendation
 ```
 
@@ -71,10 +73,22 @@ Official source page
 | `sourceFingerprint` | Stable hash of source and canonical activity identity |
 | `fetchedAt` | Time the item was retrieved |
 | `parsedCashbackRate`, `parsedAmountThreshold`, `parsedValidityStart`, `parsedValidityEnd` | Optional extracted values |
+| `benefitType`, `cashbackRate`, `fixedDiscountAmount` | Reviewed benefit kind and its value |
+| `originType`, `originMerchantId`, `originOutletId` | Whether the promotion originates from a Merchant or a physical shopping Outlet |
+| `eligibilityType` | Merchant-wide, selected Merchant branches, or the exact origin Outlet |
+| `eligibleBranchIds` | Merchant branches covered by a branch-limited Merchant promotion |
+| `excludedMerchantIds`, `excludedBranchIds` | Structured exclusions for an Outlet promotion |
+| `paymentMethodIds` | Payment methods covered by the promotion |
+| `promotionNote` | User-facing exclusions, restrictions, or quantity caveats |
 | `status` | `pending_review`, `published`, or `rejected` |
-| `merchantId`, `paymentMethodId` | Verified catalog mapping selected during review |
-| `rewardRuleId` | Rule created by publishing |
+| `merchantId`, `paymentMethodId` | Legacy review fields retained for compatibility |
+| `promotionId` | Canonical promotion created by publishing |
 | `reviewedAt`, `rejectionReason` | Review audit data |
+
+`MerchantBranch` records a named store branch belonging to a Merchant and may
+be associated with a physical `Outlet` such as a shopping mall. Multiple
+Merchants can have branches at the same Outlet; an Outlet is not a Merchant
+branch. Published Promotions retain their source URL and structured scope.
 
 `sourceFingerprint` is unique per source activity. A repeat import updates only
 an existing `pending_review` draft's captured source data and parsed values. It
@@ -104,25 +118,56 @@ Authenticated Admin APIs expose:
 
 - `GET /api/admin/import-runs`
 - `GET /api/admin/promotion-drafts?status=pending_review`
+- `GET /api/admin/outlets`, `POST /api/admin/outlets`
+- `GET /api/admin/merchants/:merchantId/branches`
+- `POST /api/admin/merchants/:merchantId/branches`
 - `PATCH /api/admin/promotion-drafts/:id` to save verified fields and catalog
   mappings while still pending
 - `POST /api/admin/promotion-drafts/:id/publish`
 - `POST /api/admin/promotion-drafts/:id/reject`
+- `POST /api/admin/promotion-drafts/:id/reopen` for rejected drafts
 
-The Admin page adds an **Imported promotions** section. It shows the source,
+The Admin page adds separate shopping Outlet and Merchant branch management
+and an **Imported promotions**
+section. It shows the source,
 URL, captured text, parsed values, run status, and draft status. For each
 pending draft the reviewer can:
 
-1. Choose existing merchant and payment method catalog records.
-2. Add the acceptance mapping through the existing catalog controls if needed.
-3. Correct cashback rate, amount threshold, dates, and promotion note.
+1. Choose the origin (Merchant or shopping Outlet), the applicable eligibility,
+   and one or more payment methods.
+2. Add named Merchant branches or shopping Outlets to the catalog when needed.
+   Merchant-wide offers can instead be limited to selected branches; Outlet
+   offers can carry structured Merchant and branch exclusions.
+3. Choose cashback or fixed discount, correct the benefit value, amount
+   threshold, dates, and user-facing exclusions or quantity caveats.
 4. Publish or reject with a required rejection reason.
 
-Publishing validates that the draft is still pending, its mapping and all
-reward fields are present and valid, and the selected payment method is
-accepted by the merchant. It uses a transaction to create the reward rule and
-mark the draft published together. A failed validation leaves the draft
-pending. A published or rejected draft cannot be published again.
+Publishing validates that the draft is still pending, its origin, eligibility,
+catalog references, and required benefit fields are valid for its benefit type.
+It copies the official source URL and user-facing terms into a canonical
+Promotion, then marks the draft published in the same transaction. Merchant
+payment-method acceptance is checked during recommendation generation so an
+Outlet-origin promotion can apply to Merchants without being the Merchant's
+origin. A failed validation leaves the draft pending. Published drafts cannot
+be republished; rejected drafts must first be explicitly reopened. Re-import
+alone never reopens a rejected draft.
+
+### Benefit and Outlet Eligibility
+
+The existing amount threshold remains the minimum qualifying purchase. Fixed
+discounts are ranked by their fixed amount; cashback is estimated from purchase
+amount and rate. Product exclusions and limited quantities are not calculated
+from unavailable basket or quota data. The reviewer-authored note is shown as a
+caveat, and the official URL lets users check current terms and availability.
+
+Recommendation requests may include numeric `branch_id` and `outlet_id`
+catalog IDs. The API validates their existence and consistency; it never
+matches or guesses locations by name or address. Branch-limited Merchant
+promotions require an explicitly selected eligible branch. Outlet promotions
+require the exact selected Outlet and apply only to its non-excluded Merchants
+and branches. The public UI offers separate Merchant branch and shopping
+Outlet selectors, shows the promotion origin and eligibility, and renders the
+review note and official source link.
 
 ## Error Handling
 
@@ -141,8 +186,11 @@ Tests cover:
   saved fixture content, without live network calls.
 - Idempotent handling of a repeated fingerprint for each draft state.
 - Draft API authorization, filtering, validation, rejection, and missing IDs.
-- Publish validation, atomic creation of a reward rule, and enforcement of the
-  existing merchant-acceptance invariant.
+- Publish validation, atomic creation of a Promotion, and recommendation-time
+  Merchant acceptance checks.
+- Fixed-discount publishing, Outlet and Merchant branch eligibility,
+  structured exclusions, user-facing notes, and
+  official source URL propagation to recommendation results.
 - CLI source selection, success exit behavior, and failed run recording.
 - Admin UI syntax plus draft rendering and submission behavior where practical.
 

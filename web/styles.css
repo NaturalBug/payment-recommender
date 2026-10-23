@@ -388,6 +388,10 @@ th, td {
   grid-column: 1 / -1;
 }
 
+.promotion-draft-form select[multiple] {
+  min-height: 120px;
+}
+
 .promotion-draft-hint,
 .promotion-draft-readonly-note {
   margin: 0;

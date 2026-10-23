@@ -8,11 +8,16 @@ type RewardRuleRow = {
   merchantId: number;
   paymentMethodId: number;
   cashbackRate: unknown;
+  benefitType: string;
+  fixedDiscountAmount: number | null;
   amountThreshold: number;
   validityStart: Date;
   validityEnd: Date;
   promotionNote: string | null;
+  sourceUrl: string | null;
   paymentMethod: { name: string };
+  branchId: number | null;
+  branch: { name: string } | null;
 };
 
 function toRewardRuleRecord(rule: RewardRuleRow): RewardRuleRecord {
@@ -21,11 +26,16 @@ function toRewardRuleRecord(rule: RewardRuleRow): RewardRuleRecord {
     merchantId: rule.merchantId,
     paymentMethodId: rule.paymentMethodId,
     paymentMethodName: rule.paymentMethod.name,
-    cashbackRate: Number(rule.cashbackRate),
+    benefitType: rule.benefitType as RewardRuleRecord['benefitType'],
+    cashbackRate: rule.cashbackRate === null ? null : Number(rule.cashbackRate),
+    fixedDiscountAmount: rule.fixedDiscountAmount,
     amountThreshold: rule.amountThreshold,
     validityStart: rule.validityStart,
     validityEnd: rule.validityEnd,
-    promotionNote: rule.promotionNote
+    promotionNote: rule.promotionNote,
+    sourceUrl: rule.sourceUrl,
+    outletId: rule.branchId,
+    outletName: rule.branch?.name ?? null
   };
 }
 
@@ -33,14 +43,19 @@ const rewardRuleSelect = {
   id: true,
   merchantId: true,
   paymentMethodId: true,
+  benefitType: true,
   cashbackRate: true,
+  fixedDiscountAmount: true,
   amountThreshold: true,
   validityStart: true,
   validityEnd: true,
   promotionNote: true,
+  sourceUrl: true,
+  branchId: true,
   paymentMethod: {
     select: { name: true }
-  }
+  },
+  branch: { select: { name: true } }
 } as const;
 
 export async function listRewardRules(): Promise<RewardRuleRecord[]> {
@@ -55,13 +70,26 @@ export async function listRewardRules(): Promise<RewardRuleRecord[]> {
 export async function createRewardRule(input: {
   merchantId: number;
   paymentMethodId: number;
-  cashbackRate: number;
+  benefitType?: 'cashback' | 'fixed_discount';
+  cashbackRate?: number;
+  fixedDiscountAmount?: number;
   amountThreshold: number;
   validityStart: Date;
   validityEnd: Date;
   promotionNote?: string;
+  sourceUrl?: string;
+  outletId?: number | null;
 }): Promise<RewardRuleRecord> {
   try {
+    const benefitType = input.benefitType ?? 'cashback';
+    if (
+      (benefitType === 'cashback' && (!Number.isFinite(input.cashbackRate) || (input.cashbackRate ?? -1) < 0)) ||
+      (benefitType === 'fixed_discount' &&
+        (!Number.isInteger(input.fixedDiscountAmount) || (input.fixedDiscountAmount ?? 0) <= 0))
+    ) {
+      throw new RepositoryValidationError('benefit values are invalid');
+    }
+
     const rule = await prisma.$transaction(async (transaction) => {
       const acceptance = await transaction.merchantPaymentAcceptance.findUnique({
         where: {
@@ -76,15 +104,30 @@ export async function createRewardRule(input: {
         throw new RepositoryValidationError('payment method is not accepted by this merchant');
       }
 
+      if (input.outletId !== undefined && input.outletId !== null) {
+        const branch = await transaction.merchantBranch.findFirst({
+          where: { id: input.outletId, merchantId: input.merchantId },
+          select: { id: true }
+        });
+
+        if (!branch) {
+          throw new RepositoryValidationError('branch does not belong to this merchant');
+        }
+      }
+
       return transaction.rewardRule.create({
         data: {
           merchantId: input.merchantId,
           paymentMethodId: input.paymentMethodId,
-          cashbackRate: input.cashbackRate,
+          benefitType,
+          cashbackRate: benefitType === 'cashback' ? input.cashbackRate : null,
+          fixedDiscountAmount: benefitType === 'fixed_discount' ? input.fixedDiscountAmount : null,
           amountThreshold: input.amountThreshold,
           validityStart: input.validityStart,
           validityEnd: input.validityEnd,
-          promotionNote: input.promotionNote ?? null
+          promotionNote: input.promotionNote ?? null,
+          sourceUrl: input.sourceUrl ?? null,
+          branchId: input.outletId ?? null
         },
         select: rewardRuleSelect
       });

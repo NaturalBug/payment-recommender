@@ -8,6 +8,14 @@ type SourceImporterConfig = {
   allowedPathPrefixes?: string[];
 };
 
+export type ExtractedPromotionCard = {
+  href: string;
+  innerHtml: string;
+  text: string;
+};
+
+export type PromotionCardExtractor = (html: string) => ExtractedPromotionCard[];
+
 const officialUserAgent = 'payment-recommender-importer/1.0 (+https://github.com/)';
 
 function decodeHtmlEntities(value: string): string {
@@ -34,6 +42,10 @@ function stripTags(html: string): string {
 
 function normalizeWhitespace(value: string): string {
   return decodeHtmlEntities(value).replace(/\u3000/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function normalizeHtmlText(html: string): string {
+  return normalizeWhitespace(stripTags(html));
 }
 
 function extractTitle(innerHtml: string, fallbackText: string): string {
@@ -135,14 +147,14 @@ function resolveOfficialCardUrl(
   return resolvedUrl;
 }
 
-function extractLinkedCards(html: string): Array<{ href: string; innerHtml: string; text: string }> {
+function extractLinkedCards(html: string): ExtractedPromotionCard[] {
   const anchorPattern = /<a\b[^>]*href=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
-  const cards: Array<{ href: string; innerHtml: string; text: string }> = [];
+  const cards: ExtractedPromotionCard[] = [];
 
   for (const match of html.matchAll(anchorPattern)) {
     const href = match[2];
     const innerHtml = match[3];
-    const text = normalizeWhitespace(stripTags(innerHtml));
+    const text = normalizeHtmlText(innerHtml);
     const looksLikeCard = /<(h[1-6]|p|article|section|li|div|span)\b/i.test(innerHtml);
 
     if (!text || text.length < 12 || !looksLikeCard) {
@@ -205,7 +217,8 @@ export async function fetchOfficialPage(url: string): Promise<string> {
 
 export function createPromotionSourceAdapter(
   config: SourceImporterConfig,
-  fetchPage?: FetchPage
+  fetchPage?: FetchPage,
+  extractCards: PromotionCardExtractor = extractLinkedCards
 ): PromotionSourceAdapter {
   const listUrl = buildOfficialUrl(config.listUrl, config.allowedHostnames).toString();
   const fetchConfiguredPage = fetchPage ?? ((pageUrl: string) => fetchOfficialPage(pageUrl));
@@ -215,7 +228,8 @@ export function createPromotionSourceAdapter(
     async import() {
       const html = await fetchConfiguredPage(listUrl);
 
-      return extractLinkedCards(html)
+      return extractCards(html)
+        .filter((card) => card.text.length >= 12)
         .map((card) => toPromotionCandidate(config, listUrl, card))
         .filter((candidate): candidate is ImportedPromotionCandidate => candidate !== null);
     }

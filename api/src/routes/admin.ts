@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import prisma from '../lib/prisma';
 import {
   createMerchant,
@@ -19,6 +19,8 @@ import {
   listAcceptedPaymentMethods,
   removeAcceptance
 } from '../repositories/merchantPaymentAcceptanceRepository';
+import { createMerchantBranch, listMerchantBranches } from '../repositories/merchantBranchRepository';
+import { createOutlet, listOutlets } from '../repositories/outletRepository';
 import {
   createRewardRule,
   deleteRewardRule,
@@ -29,6 +31,7 @@ import {
   listImportRuns,
   listPromotionDrafts,
   publishPromotionDraft,
+  reopenPromotionDraft,
   rejectPromotionDraft,
   updatePromotionDraft
 } from '../repositories/promotionImportRepository';
@@ -39,6 +42,7 @@ import {
 } from '../repositories/errors';
 import type {
   ImportRunRecord,
+  PromotionRecord,
   PromotionDraftRecord,
   PromotionDraftReviewInput,
   PromotionDraftStatus,
@@ -48,13 +52,24 @@ import type {
 const router = Router();
 const promotionDraftStatuses: PromotionDraftStatus[] = ['pending_review', 'published', 'rejected'];
 const promotionDraftReviewFields = [
+  'originType',
+  'originMerchantId',
+  'originOutletId',
+  'eligibilityType',
+  'eligibleBranchIds',
+  'excludedMerchantIds',
+  'excludedBranchIds',
+  'paymentMethodIds',
   'merchantId',
   'paymentMethodId',
+  'benefitType',
   'cashbackRate',
+  'fixedDiscountAmount',
   'amountThreshold',
   'validityStart',
   'validityEnd',
-  'promotionNote'
+  'promotionNote',
+  'outletId'
 ] as const;
 
 function serializeDateOnly(value: Date | null | undefined): string | null | undefined {
@@ -89,6 +104,14 @@ function serializeRewardRule(rule: RewardRuleRecord) {
     ...rule,
     validityStart: rule.validityStart.toISOString().slice(0, 10),
     validityEnd: rule.validityEnd.toISOString().slice(0, 10)
+  };
+}
+
+function serializePromotion(promotion: PromotionRecord) {
+  return {
+    ...promotion,
+    validityStart: promotion.validityStart.toISOString().slice(0, 10),
+    validityEnd: promotion.validityEnd.toISOString().slice(0, 10)
   };
 }
 
@@ -141,6 +164,46 @@ function parsePromotionDraftReviewPatch(
 
   const patch: PromotionDraftReviewInput = {};
 
+  if (hasOwn(values, 'originType')) {
+    if (values.originType !== null && values.originType !== 'merchant' && values.originType !== 'outlet') {
+      throw new RepositoryValidationError('originType must be merchant or outlet');
+    }
+    patch.originType = values.originType;
+  }
+
+  for (const field of ['originMerchantId', 'originOutletId'] as const) {
+    if (!hasOwn(values, field)) continue;
+    if (values[field] === null) {
+      patch[field] = null;
+      continue;
+    }
+    const parsed = parseNumericValue(values[field], field);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+      throw new RepositoryValidationError(`${field} must be a positive integer`);
+    }
+    patch[field] = parsed;
+  }
+
+  if (hasOwn(values, 'eligibilityType')) {
+    const eligibilityTypes = ['merchant_wide', 'selected_branches', 'outlet'];
+    if (values.eligibilityType !== null && !eligibilityTypes.includes(String(values.eligibilityType))) {
+      throw new RepositoryValidationError('eligibilityType is invalid');
+    }
+    patch.eligibilityType = values.eligibilityType as PromotionDraftReviewInput['eligibilityType'];
+  }
+
+  for (const field of ['eligibleBranchIds', 'excludedMerchantIds', 'excludedBranchIds', 'paymentMethodIds'] as const) {
+    if (!hasOwn(values, field)) continue;
+    if (!Array.isArray(values[field])) {
+      throw new RepositoryValidationError(`${field} must be an array of positive integer IDs`);
+    }
+    const ids = (values[field] as unknown[]).map((value) => parseNumericValue(value, field));
+    if (ids.some((value) => !Number.isSafeInteger(value) || value <= 0) || new Set(ids).size !== ids.length) {
+      throw new RepositoryValidationError(`${field} must contain unique positive integer IDs`);
+    }
+    patch[field] = ids;
+  }
+
   for (const field of ['merchantId', 'paymentMethodId'] as const) {
     if (!hasOwn(values, field)) continue;
     if (values[field] === null) {
@@ -163,6 +226,25 @@ function parsePromotionDraftReviewPatch(
         throw new RepositoryValidationError('cashbackRate must be a non-negative number');
       }
       patch.cashbackRate = cashbackRate;
+    }
+  }
+
+  if (hasOwn(values, 'benefitType')) {
+    if (values.benefitType !== 'cashback' && values.benefitType !== 'fixed_discount') {
+      throw new RepositoryValidationError('benefitType must be cashback or fixed_discount');
+    }
+    patch.benefitType = values.benefitType;
+  }
+
+  if (hasOwn(values, 'fixedDiscountAmount')) {
+    if (values.fixedDiscountAmount === null) {
+      patch.fixedDiscountAmount = null;
+    } else {
+      const fixedDiscountAmount = parseNumericValue(values.fixedDiscountAmount, 'fixedDiscountAmount');
+      if (!Number.isInteger(fixedDiscountAmount) || fixedDiscountAmount <= 0) {
+        throw new RepositoryValidationError('fixedDiscountAmount must be a positive integer');
+      }
+      patch.fixedDiscountAmount = fixedDiscountAmount;
     }
   }
 
@@ -201,6 +283,18 @@ function parsePromotionDraftReviewPatch(
     patch.promotionNote = typeof values.promotionNote === 'string' ? values.promotionNote.trim() || null : null;
   }
 
+  if (hasOwn(values, 'outletId')) {
+    if (values.outletId === null) {
+      patch.outletId = null;
+    } else {
+      const outletId = parseNumericValue(values.outletId, 'outletId');
+      if (!Number.isInteger(outletId) || outletId <= 0) {
+        throw new RepositoryValidationError('outletId must be a positive integer');
+      }
+      patch.outletId = outletId;
+    }
+  }
+
   const start = hasOwn(values, 'validityStart')
     ? patch.validityStart ?? null
     : existing.validityStart ?? existing.parsedValidityStart ?? null;
@@ -227,11 +321,16 @@ function toRewardRuleResponse(rule: Awaited<ReturnType<typeof listRewardRules>>[
     id: String(rule.id),
     merchantName,
     paymentMethodId: rule.paymentMethodId,
-    cashbackRate: Number(rule.cashbackRate),
+    benefitType: rule.benefitType,
+    cashbackRate: rule.cashbackRate ?? undefined,
+    fixedDiscountAmount: rule.fixedDiscountAmount,
     amountThreshold: rule.amountThreshold,
     validityStart: rule.validityStart.toISOString().slice(0, 10),
     validityEnd: rule.validityEnd.toISOString().slice(0, 10),
-    promotionNote: rule.promotionNote ?? undefined
+    promotionNote: rule.promotionNote ?? undefined,
+    sourceUrl: rule.sourceUrl ?? undefined,
+    outletId: rule.outletId ?? undefined,
+    outletName: rule.outletName ?? undefined
   };
 }
 
@@ -362,6 +461,113 @@ router.delete('/merchants/:id', async (req, res) => {
     });
   }
 });
+
+router.get('/outlets', async (_req, res) => {
+  try {
+    return res.json({ success: true, data: await listOutlets() });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list outlets'
+    });
+  }
+});
+
+router.post('/outlets', async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const location = req.body?.location;
+  if (!name || name.length > 120 || (location !== undefined && (typeof location !== 'string' || location.length > 200))) {
+    return res.status(400).json({ success: false, message: 'a valid outlet name is required' });
+  }
+
+  try {
+    return res.status(201).json({
+      success: true,
+      data: await createOutlet({ name, location })
+    });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to create outlet'
+    });
+  }
+});
+
+const listBranchesHandler: RequestHandler = async (req, res) => {
+  const merchantIdParam = req.params.merchantId;
+  const merchantId = parsePositiveIntId(Array.isArray(merchantIdParam) ? merchantIdParam[0] : merchantIdParam);
+  if (merchantId === null) {
+    return res.status(404).json({ success: false, message: 'merchant not found' });
+  }
+
+  try {
+    const merchant = await prisma.merchant.findUnique({ where: { id: merchantId }, select: { id: true } });
+    if (!merchant) {
+      return res.status(404).json({ success: false, message: 'merchant not found' });
+    }
+    return res.json({ success: true, data: await listMerchantBranches(merchantId) });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list merchant branches'
+    });
+  }
+};
+
+router.get('/merchants/:merchantId/branches', listBranchesHandler);
+router.get('/merchants/:merchantId/outlets', listBranchesHandler);
+
+const createBranchHandler: RequestHandler = async (req, res) => {
+  const merchantIdParam = req.params.merchantId;
+  const merchantId = parsePositiveIntId(Array.isArray(merchantIdParam) ? merchantIdParam[0] : merchantIdParam);
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const location = req.body?.location;
+  const rawOutletId = req.body?.outletId;
+  const outletId = rawOutletId === undefined || rawOutletId === null ? null : Number(rawOutletId);
+  if (merchantId === null) {
+    return res.status(404).json({ success: false, message: 'merchant not found' });
+  }
+  if (
+    !name ||
+    name.length > 120 ||
+    (location !== undefined && (typeof location !== 'string' || location.length > 200)) ||
+    (rawOutletId !== undefined &&
+      rawOutletId !== null &&
+      (!Number.isSafeInteger(outletId) || (outletId ?? 0) <= 0))
+  ) {
+    return res.status(400).json({ success: false, message: 'valid branch details are required' });
+  }
+
+  try {
+    const branch = await createMerchantBranch({
+      merchantId,
+      name,
+      location: typeof location === 'string' ? location : undefined,
+      outletId
+    });
+    return res.status(201).json({ success: true, data: branch });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to create merchant branch'
+    });
+  }
+};
+
+router.post('/merchants/:merchantId/branches', createBranchHandler);
+router.post('/merchants/:merchantId/outlets', createBranchHandler);
 
 // ---------------------------------------------------------------------------
 // Payment Methods
@@ -724,7 +930,7 @@ router.post('/promotion-drafts/:id/publish', async (req, res) => {
       success: true,
       data: {
         ...serializePromotionDraft(result.draft),
-        rewardRule: serializeRewardRule(result.rewardRule)
+        promotion: serializePromotion(result.promotion)
       }
     });
   } catch (error) {
@@ -776,6 +982,32 @@ router.post('/promotion-drafts/:id/reject', async (req, res) => {
   }
 });
 
+router.post('/promotion-drafts/:id/reopen', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'promotion draft not found' });
+  }
+
+  try {
+    const reopened = await reopenPromotionDraft(id);
+    if (!reopened) {
+      return res.status(404).json({ success: false, message: 'promotion draft not found' });
+    }
+    return res.json({ success: true, data: serializePromotionDraft(reopened) });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to reopen promotion draft'
+    });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Reward Rules
 // ---------------------------------------------------------------------------
@@ -806,13 +1038,55 @@ router.get('/reward-rules', async (_req, res) => {
 });
 
 router.post('/reward-rules', async (req, res) => {
-  const { merchantName, paymentMethodId, cashbackRate, amountThreshold, validityStart, validityEnd, promotionNote } = req.body || {};
+  const {
+    merchantName,
+    paymentMethodId,
+    benefitType: rawBenefitType,
+    cashbackRate,
+    fixedDiscountAmount,
+    amountThreshold,
+    validityStart,
+    validityEnd,
+    promotionNote,
+    sourceUrl,
+    outletId: rawOutletId
+  } = req.body || {};
   const merchantNameValue = String(merchantName ?? '').trim();
   const paymentMethodIdValue = Number(paymentMethodId);
-  const cashbackRateValue = Number(cashbackRate ?? 0);
+  const benefitType = rawBenefitType ?? 'cashback';
+  const cashbackRateValue = cashbackRate === undefined ? undefined : Number(cashbackRate);
+  const fixedDiscountAmountValue = fixedDiscountAmount === undefined ? undefined : Number(fixedDiscountAmount);
   const amountThresholdValue = Number(amountThreshold ?? 0);
+  const outletIdValue = rawOutletId === undefined || rawOutletId === null ? null : Number(rawOutletId);
   const validityStartValue = new Date(String(validityStart ?? ''));
   const validityEndValue = new Date(String(validityEnd ?? ''));
+  let sourceUrlValue: string | undefined;
+
+  if (
+    promotionNote !== undefined &&
+    promotionNote !== null &&
+    (typeof promotionNote !== 'string' || promotionNote.length > 500)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'promotionNote must be a string no longer than 500 characters'
+    });
+  }
+
+  if (sourceUrl !== undefined && sourceUrl !== null && sourceUrl !== '') {
+    if (typeof sourceUrl !== 'string' || sourceUrl.length > 2000) {
+      return res.status(400).json({ success: false, message: 'sourceUrl must be an HTTPS URL' });
+    }
+    try {
+      const parsedUrl = new URL(sourceUrl);
+      if (parsedUrl.protocol !== 'https:') {
+        throw new Error('invalid protocol');
+      }
+      sourceUrlValue = parsedUrl.toString();
+    } catch {
+      return res.status(400).json({ success: false, message: 'sourceUrl must be an HTTPS URL' });
+    }
+  }
 
   if (!merchantNameValue || !Number.isInteger(paymentMethodIdValue) || paymentMethodIdValue <= 0 || !validityStart || !validityEnd) {
     return res.status(400).json({
@@ -822,16 +1096,20 @@ router.post('/reward-rules', async (req, res) => {
   }
 
   if (
-    !Number.isFinite(cashbackRateValue) ||
-    !Number.isFinite(amountThresholdValue) ||
+    (benefitType !== 'cashback' && benefitType !== 'fixed_discount') ||
+    (benefitType === 'cashback' && (!Number.isFinite(cashbackRateValue) || (cashbackRateValue ?? -1) < 0)) ||
+    (benefitType === 'fixed_discount' &&
+      (!Number.isInteger(fixedDiscountAmountValue) || (fixedDiscountAmountValue ?? 0) <= 0)) ||
+    !Number.isInteger(amountThresholdValue) ||
     amountThresholdValue < 0 ||
+    (outletIdValue !== null && (!Number.isInteger(outletIdValue) || outletIdValue <= 0)) ||
     Number.isNaN(validityStartValue.getTime()) ||
     Number.isNaN(validityEndValue.getTime()) ||
     validityEndValue < validityStartValue
   ) {
     return res.status(400).json({
       success: false,
-      message: 'cashbackRate, amountThreshold, and validity dates must be valid'
+      message: 'benefit values, amountThreshold, and validity dates must be valid'
     });
   }
 
@@ -856,11 +1134,15 @@ router.post('/reward-rules', async (req, res) => {
     const createdRule = await createRewardRule({
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
+      benefitType,
       cashbackRate: cashbackRateValue,
+      fixedDiscountAmount: fixedDiscountAmountValue,
       amountThreshold: amountThresholdValue,
       validityStart: validityStartValue,
       validityEnd: validityEndValue,
-      promotionNote: promotionNote ? String(promotionNote) : undefined
+      promotionNote: promotionNote ? String(promotionNote) : undefined,
+      sourceUrl: sourceUrlValue,
+      outletId: outletIdValue
     });
 
     return res.status(201).json({

@@ -46,13 +46,12 @@ npx prisma db push
 npm run db:seed
 ```
 
-Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the database file in `api/prisma/` and do not commit it; it is already ignored by git.
-The catalog schema is intentionally not backward-compatible while the project
-is in its early stages. After pulling a schema update, reset and reinitialize
-the local database:
+Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep
+the database file in `api/prisma/` and do not commit it; it is already ignored
+by git. Back up local SQLite data before applying schema updates, then update
+the schema in place:
 
 ```bash
-rm -f prisma/dev.db
 npx prisma db push
 npm run db:seed
 ```
@@ -71,6 +70,11 @@ The first manual-import beta supports exactly these official public sources:
 - `line-pay`
 - `jko-pay`
 - `ipass-money`
+
+The JKO Pay importer reads the localized official campaign listing directly and
+keeps only official campaign or event links. The iPASS MONEY importer reads
+promotion cards from its public listing and accepts only official promotion
+detail links. Both sources still produce drafts for manual review.
 
 Initialize the local database with the existing setup commands before importing:
 
@@ -92,10 +96,18 @@ npm run import:promotions -- --source ipass-money
 ```
 
 Each successful run creates an `ImportRun` record plus reviewable
-`PromotionDraft` entries. Drafts do not affect `/api/recommendations`, and
-they do not create `RewardRule` records automatically. Only a successful
-manual review and publish action creates a `RewardRule` that can affect public
-recommendations.
+`PromotionDraft` entries. Drafts do not affect `/api/recommendations` and do
+not publish automatically. An approved draft creates a canonical `Promotion`
+record, which can affect public recommendations.
+
+Reward rules support both percentage cashback and fixed cash discounts. Admins
+can manage shopping Outlets (physical venues) separately from Merchant
+branches. A promotion may originate from a Merchant or a shopping Outlet;
+Merchant promotions may apply Merchant-wide or to selected branches, while
+Outlet promotions apply at one exact Outlet and can exclude Merchants or
+branches. Recommendations use selected catalog IDs, not names or inferred
+locations. Review notes for exclusions or limited quantities are shown with
+the result, alongside a link to the official promotion terms.
 
 Import failures exit non-zero and are recorded on the related import run. Only
 allowed official public pages are supported in this phase. Source availability,
@@ -110,20 +122,23 @@ that is no longer publicly permitted.
 2. Use the **Imported promotions** section to inspect recent import runs and
    pending drafts, including the official source URL, captured source text, and
    parsed values.
-3. If the merchant or payment method does not already exist, add it with the
-   existing catalog controls. If the merchant does not accept the selected
-   payment method yet, add that acceptance mapping before publishing.
-4. Save the reviewed merchant, payment method, cashback rate, threshold,
-   validity dates, and optional note on the draft.
-5. Publish the draft to create a normal `RewardRule`, or reject it with a
-   reason to keep it out of recommendations.
+3. Add any missing Merchant branches, shopping Outlets, or payment methods.
+   Configure accepted payment methods for Merchants as needed; acceptance is
+   checked when recommendations are generated.
+4. Save the reviewed origin, eligibility, payment methods, included branches,
+   exclusions, benefit, threshold, dates, and optional user-facing note.
+5. Publish the draft to create a canonical `Promotion`, or reject it with a
+   reason to keep it out of recommendations. Rejected drafts can be reopened
+   for review; importing the same activity does not reopen them automatically.
+6. On the public page, choose the Merchant branch and/or shopping Outlet
+   explicitly to include matching location-specific promotions.
 
 ## Test isolation
 
-Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. For a completely clean setup, remove stale database files before reinitializing:
+Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. To reset only the isolated test database if it becomes stale:
 
 ```bash
-rm -f api/prisma/dev.db api/prisma/test.db
+rm -f api/prisma/test.db
 ```
 
 ## Future PostgreSQL migration notes

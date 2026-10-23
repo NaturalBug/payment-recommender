@@ -6,7 +6,9 @@ export type ImportedPromotionCandidate = {
   sourceTitle: string;
   sourceContent: string;
   fetchedAt: Date;
+  parsedBenefitType?: 'cashback' | 'fixed_discount';
   parsedCashbackRate?: number;
+  parsedFixedDiscountAmount?: number;
   parsedAmountThreshold?: number;
   parsedValidityStart?: Date;
   parsedValidityEnd?: Date;

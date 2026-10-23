@@ -1,14 +1,24 @@
 const ruleMerchantSelect = document.getElementById('rule-merchant');
 const merchantForm = document.getElementById('merchant-form');
 const paymentMethodForm = document.getElementById('payment-method-form');
+const physicalOutletForm = document.getElementById('physical-outlet-form');
+const branchForm = document.getElementById('branch-form');
 const rewardRuleForm = document.getElementById('reward-rule-form');
 const refreshCatalogButton = document.getElementById('refresh-catalog');
 const catalogStatus = document.getElementById('catalog-status');
 const merchantsContainer = document.getElementById('merchants');
 const paymentMethodsContainer = document.getElementById('payment-methods');
+const outletsContainer = document.getElementById('outlets');
+const branchesContainer = document.getElementById('branches');
 const acceptanceMerchantSelect = document.getElementById('acceptance-merchant');
+const branchMerchantSelect = document.getElementById('branch-merchant');
+const branchOutletSelect = document.getElementById('branch-outlet');
 const acceptedPaymentMethods = document.getElementById('accepted-payment-methods');
 const rewardRules = document.getElementById('reward-rules');
+const ruleOutletSelect = document.getElementById('rule-outlet');
+const benefitTypeSelect = document.getElementById('benefit-type');
+const cashbackRateInput = document.getElementById('cashback-rate');
+const fixedDiscountAmountInput = document.getElementById('fixed-discount-amount');
 const promotionDraftStatusFilter = document.getElementById('promotion-draft-status');
 const importRunsContainer = document.getElementById('import-runs');
 const promotionDraftsContainer = document.getElementById('promotion-drafts');
@@ -21,13 +31,24 @@ const today = new Date().toISOString().slice(0, 10);
 let adminApiKey = '';
 let merchants = [];
 let paymentMethods = [];
+let physicalOutlets = [];
+let merchantBranches = [];
 let importRuns = [];
 let promotionDrafts = [];
-let acceptedPaymentMethodCache = new Map();
 
 refreshCatalogButton.disabled = true;
 document.getElementById('validity-start').value = today;
 document.getElementById('validity-end').value = today;
+cashbackRateInput.required = true;
+fixedDiscountAmountInput.required = false;
+
+function syncBenefitInputs() {
+  const isCashback = benefitTypeSelect.value === 'cashback';
+  cashbackRateInput.required = isCashback;
+  fixedDiscountAmountInput.required = !isCashback;
+  cashbackRateInput.disabled = !isCashback;
+  fixedDiscountAmountInput.disabled = isCashback;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -53,10 +74,6 @@ function formatOptionalValue(value, fallback = '—') {
 
 function findMerchantName(merchantId) {
   return merchants.find((merchant) => merchant.id === merchantId)?.name || `Merchant #${merchantId}`;
-}
-
-function findPaymentMethodName(paymentMethodId) {
-  return paymentMethods.find((method) => method.id === paymentMethodId)?.name || `Payment method #${paymentMethodId}`;
 }
 
 async function requestJson(path, options = {}) {
@@ -116,6 +133,16 @@ async function fetchPaymentMethods() {
   return json.data || [];
 }
 
+async function fetchMerchantBranches(merchantId) {
+  const json = await requestJson(`/api/admin/merchants/${encodeURIComponent(merchantId)}/branches`);
+  return json.data || [];
+}
+
+async function fetchOutlets() {
+  const json = await requestJson('/api/admin/outlets');
+  return json.data || [];
+}
+
 async function fetchRewardRules() {
   const json = await requestJson('/api/admin/reward-rules');
   return json.data || [];
@@ -137,41 +164,35 @@ async function fetchAcceptedPaymentMethods(merchantId) {
   return json.data || [];
 }
 
-async function fetchAcceptedPaymentMethodIds(merchantId) {
-  if (!merchantId) {
-    return new Set();
-  }
-
-  const cacheKey = String(merchantId);
-  if (acceptedPaymentMethodCache.has(cacheKey)) {
-    return acceptedPaymentMethodCache.get(cacheKey);
-  }
-
-  const accepted = await fetchAcceptedPaymentMethods(merchantId);
-  const acceptedIds = new Set(accepted.map((method) => Number(method.id)));
-  acceptedPaymentMethodCache.set(cacheKey, acceptedIds);
-  return acceptedIds;
-}
-
-async function primePromotionDraftAcceptanceCache(drafts) {
-  const merchantIds = [...new Set(
-    drafts
-      .map((draft) => draft.merchantId)
-      .filter((merchantId) => Number.isInteger(merchantId) && merchantId > 0)
-  )];
-
-  await Promise.all(merchantIds.map((merchantId) => fetchAcceptedPaymentMethodIds(merchantId)));
-}
-
 function renderMerchantOptions() {
   const options = merchants.length
     ? merchants.map((merchant) => `<option value="${merchant.id}">${escapeHtml(merchant.name)}</option>`).join('')
     : '<option value="">Add a merchant first</option>';
 
-  ruleMerchantSelect.innerHTML = merchants.length
-    ? merchants.map((merchant) => `<option value="${escapeHtml(merchant.name)}">${escapeHtml(merchant.name)}</option>`).join('')
-    : options;
+  ruleMerchantSelect.innerHTML = options;
   acceptanceMerchantSelect.innerHTML = options;
+  branchMerchantSelect.innerHTML = options;
+  branchOutletSelect.innerHTML = [
+    '<option value="">No Outlet association</option>',
+    ...physicalOutlets.map((outlet) => `<option value="${outlet.id}">${escapeHtml(outlet.name)}${outlet.location ? ` — ${escapeHtml(outlet.location)}` : ''}</option>`)
+  ].join('');
+  renderOutletOptions(ruleOutletSelect, ruleMerchantSelect.value, null);
+}
+
+function renderOutletOptions(select, merchantId, selectedOutletId, readOnly = false) {
+  const options = merchantBranches.filter((branch) => String(branch.merchantId) === String(merchantId));
+  const disabled = readOnly ? ' disabled' : '';
+  select.innerHTML = [
+    '<option value="">All branches</option>',
+    ...options.map((outlet) => `
+      <option value="${outlet.id}"${String(outlet.id) === String(selectedOutletId ?? '') ? ' selected' : ''}${disabled}>
+        ${escapeHtml(outlet.name)}${outlet.location ? ` — ${escapeHtml(outlet.location)}` : ''}
+      </option>
+    `)
+  ].join('');
+  if (readOnly && selectedOutletId && !options.some((outlet) => outlet.id === selectedOutletId)) {
+    select.innerHTML += `<option value="${selectedOutletId}" selected disabled>Branch #${selectedOutletId}</option>`;
+  }
 }
 
 function renderPaymentMethodOptions() {
@@ -237,18 +258,61 @@ function renderRewardRules(rules) {
 
   rewardRules.innerHTML = `
     <table>
-      <thead><tr><th>Merchant</th><th>Method</th><th>Rate</th><th>Validity</th><th></th></tr></thead>
+      <thead><tr><th>Merchant</th><th>Method</th><th>Benefit</th><th>Branch</th><th>Validity</th><th></th></tr></thead>
       <tbody>
         ${rules.map((rule) => `
           <tr>
             <td>${escapeHtml(rule.merchantName)}</td>
             <td>${escapeHtml(rule.paymentMethodId)}</td>
-            <td>${(Number(rule.cashbackRate) * 100).toFixed(2)}%</td>
+            <td>${rule.benefitType === 'fixed_discount'
+              ? `NT$ ${escapeHtml(rule.fixedDiscountAmount)} off`
+              : `${(Number(rule.cashbackRate) * 100).toFixed(2)}% cashback`}</td>
+            <td>${escapeHtml(rule.outletName || 'All branches')}</td>
             <td>${escapeHtml(rule.validityStart)} - ${escapeHtml(rule.validityEnd)}</td>
             <td><button class="danger-button delete-rule" type="button" data-rule-id="${escapeHtml(rule.id)}">Delete</button></td>
           </tr>
         `).join('')}
       </tbody>
+    </table>
+  `;
+}
+
+function renderOutlets() {
+  if (!physicalOutlets.length) {
+    outletsContainer.innerHTML = '<p class="muted">No outlets configured.</p>';
+    return;
+  }
+
+  outletsContainer.innerHTML = `
+    <table>
+      <thead><tr><th>Shopping Outlet</th><th>Location</th></tr></thead>
+      <tbody>${physicalOutlets.map((outlet) => `
+        <tr>
+          <td>${escapeHtml(outlet.name)}</td>
+          <td>${escapeHtml(outlet.location || '—')}</td>
+        </tr>
+      `).join('')}</tbody>
+    </table>
+  `;
+}
+
+function renderBranches() {
+  if (!merchantBranches.length) {
+    branchesContainer.innerHTML = '<p class="muted">No merchant branches configured.</p>';
+    return;
+  }
+
+  branchesContainer.innerHTML = `
+    <table>
+      <thead><tr><th>Merchant</th><th>Branch</th><th>Location</th><th>Shopping Outlet</th></tr></thead>
+      <tbody>${merchantBranches.map((branch) => `
+        <tr>
+          <td>${escapeHtml(findMerchantName(branch.merchantId))}</td>
+          <td>${escapeHtml(branch.name)}</td>
+          <td>${escapeHtml(branch.location || '—')}</td>
+          <td>${escapeHtml(physicalOutlets.find((outlet) => outlet.id === branch.outletId)?.name || '—')}</td>
+        </tr>
+      `).join('')}</tbody>
     </table>
   `;
 }
@@ -307,74 +371,85 @@ function getReviewedDraftValue(draft, reviewedField, reviewedValue, parsedValue)
     return draft[reviewedValue] ?? '';
   }
 
-  return draft[reviewedValue] ?? draft[parsedValue] ?? '';
+  return draft[parsedValue] ?? '';
 }
 
-function renderDraftMerchantOptions(selectedMerchantId, readOnly) {
-  const disabled = readOnly ? ' disabled' : '';
-  const selectedValue = Number.isInteger(selectedMerchantId) ? String(selectedMerchantId) : '';
-  const placeholder = merchants.length ? '<option value="">Select merchant</option>' : '<option value="">Add a merchant first</option>';
-  const hasSelectedMerchant = selectedValue && merchants.some((merchant) => String(merchant.id) === selectedValue);
-  const fallbackOption = selectedValue && !hasSelectedMerchant
-    ? [`<option value="${selectedValue}" selected>${escapeHtml(findMerchantName(Number(selectedValue)))}</option>`]
-    : [];
+function renderPromotionScopeOptions({ draft, disabled }) {
+  const disabledAttribute = disabled ? ' disabled' : '';
+  const selectedPaymentMethodIds = new Set(draft.paymentMethodIds || []);
+  const selectedEligibleBranchIds = new Set(draft.eligibleBranchIds || []);
+  const selectedExcludedMerchantIds = new Set(draft.excludedMerchantIds || []);
+  const selectedExcludedBranchIds = new Set(draft.excludedBranchIds || []);
 
-  return [
-    placeholder,
-    ...fallbackOption,
-    ...merchants.map((merchant) => `
-      <option value="${merchant.id}"${String(merchant.id) === selectedValue ? ' selected' : ''}${disabled}>${escapeHtml(merchant.name)}</option>
-    `)
+  const options = (items, selectedIds, label) => items.map((item) => `
+    <option value="${item.id}"${selectedIds.has(item.id) ? ' selected' : ''}>${escapeHtml(label(item))}</option>
+  `).join('');
+  const originMerchantOptions = [
+    '<option value="">Select origin Merchant</option>',
+    ...merchants.map((merchant) => `<option value="${merchant.id}"${merchant.id === draft.originMerchantId ? ' selected' : ''}>${escapeHtml(merchant.name)}</option>`)
   ].join('');
-}
-
-function renderDraftPaymentMethodOptions({ draft, acceptedIds, selectedPaymentMethodId, readOnly }) {
-  const selectedValue = Number.isInteger(selectedPaymentMethodId) ? selectedPaymentMethodId : null;
-  const placeholder = !draft.merchantId
-    ? '<option value="">Select merchant first</option>'
-    : '<option value="">Select payment method</option>';
-
-  if (readOnly) {
-    if (!selectedValue) {
-      return `${placeholder}`;
-    }
-
-    return `${placeholder}<option value="${selectedValue}" selected>${escapeHtml(findPaymentMethodName(selectedValue))}</option>`;
-  }
-
-  if (!draft.merchantId) {
-    return placeholder;
-  }
-
-  const optionMethods = paymentMethods.filter((method) => acceptedIds.has(method.id) || method.id === selectedValue);
-  if (!optionMethods.length) {
-    return '<option value="">No accepted payment methods</option>';
-  }
-
-  return [
-    placeholder,
-    ...optionMethods.map((method) => {
-      const isAccepted = acceptedIds.has(method.id);
-      const label = isAccepted ? method.name : `${method.name} (not accepted)`;
-      return `<option value="${method.id}"${method.id === selectedValue ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-    })
+  const originOutletOptions = [
+    '<option value="">Select origin Outlet</option>',
+    ...physicalOutlets.map((outlet) => `<option value="${outlet.id}"${outlet.id === draft.originOutletId ? ' selected' : ''}>${escapeHtml(outlet.name)}${outlet.location ? ` — ${escapeHtml(outlet.location)}` : ''}</option>`)
   ].join('');
-}
+  const branchOptions = (selectedIds) => merchantBranches.map((branch) => {
+    const outlet = physicalOutlets.find((item) => item.id === branch.outletId);
+    const location = [branch.location, outlet ? `at ${outlet.name}` : ''].filter(Boolean).join(' ');
+    const label = `${findMerchantName(branch.merchantId)} — ${branch.name}${location ? ` (${location})` : ''}`;
+    return `<option value="${branch.id}" data-merchant-id="${branch.merchantId}" data-outlet-id="${branch.outletId ?? ''}"${selectedIds.has(branch.id) ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
 
-function describeDraftAcceptanceState(merchantId, paymentMethodId, acceptedIds) {
-  if (!merchantId) {
-    return 'Select a merchant to review this draft.';
-  }
-
-  if (!acceptedIds.size) {
-    return 'This merchant has no accepted payment methods configured. Update Accepted payment methods before publishing.';
-  }
-
-  if (paymentMethodId && !acceptedIds.has(paymentMethodId)) {
-    return 'The selected payment method is not accepted for this merchant. Update Accepted payment methods or choose a different method before publishing.';
-  }
-
-  return 'Publishing is available once the reviewed fields are complete.';
+  return `
+    <label>
+      Promotion origin
+      <select name="originType"${disabledAttribute}>
+        <option value="">Select origin</option>
+        <option value="merchant"${draft.originType === 'merchant' ? ' selected' : ''}>Merchant</option>
+        <option value="outlet"${draft.originType === 'outlet' ? ' selected' : ''}>Shopping Outlet</option>
+      </select>
+    </label>
+    <label>
+      Origin Merchant
+      <select name="originMerchantId"${disabledAttribute}>${originMerchantOptions}</select>
+    </label>
+    <label>
+      Origin Outlet
+      <select name="originOutletId"${disabledAttribute}>${originOutletOptions}</select>
+    </label>
+    <label>
+      Eligibility
+      <select name="eligibilityType"${disabledAttribute}>
+        <option value="">Select eligibility</option>
+        <option value="merchant_wide"${draft.eligibilityType === 'merchant_wide' ? ' selected' : ''}>Merchant-wide</option>
+        <option value="selected_branches"${draft.eligibilityType === 'selected_branches' ? ' selected' : ''}>Selected Merchant branches</option>
+        <option value="outlet"${draft.eligibilityType === 'outlet' ? ' selected' : ''}>Selected Outlet</option>
+      </select>
+    </label>
+    <label>
+      Payment methods (select one or more)
+      <select name="paymentMethodIds" multiple${disabledAttribute}>
+        ${options(paymentMethods, selectedPaymentMethodIds, (method) => method.name)}
+      </select>
+    </label>
+    <label>
+      Eligible branches
+      <select name="eligibleBranchIds" multiple${disabledAttribute}>
+        ${branchOptions(selectedEligibleBranchIds)}
+      </select>
+    </label>
+    <label>
+      Excluded Merchants
+      <select name="excludedMerchantIds" multiple${disabledAttribute}>
+        ${options(merchants, selectedExcludedMerchantIds, (merchant) => merchant.name)}
+      </select>
+    </label>
+    <label>
+      Excluded branches
+      <select name="excludedBranchIds" multiple${disabledAttribute}>
+        ${branchOptions(selectedExcludedBranchIds)}
+      </select>
+    </label>
+  `;
 }
 
 function renderPromotionDrafts() {
@@ -386,13 +461,20 @@ function renderPromotionDrafts() {
 
   promotionDraftsContainer.innerHTML = promotionDrafts.map((draft) => {
     const readOnly = draft.status !== 'pending_review';
-    const merchantId = Number.isInteger(draft.merchantId) ? draft.merchantId : null;
-    const paymentMethodId = Number.isInteger(draft.paymentMethodId) ? draft.paymentMethodId : null;
     const cashbackRate = getReviewedDraftValue(
       draft,
       'cashbackRateReviewed',
       'cashbackRate',
       'parsedCashbackRate'
+    );
+    const benefitType = draft.benefitTypeReviewed
+      ? draft.benefitType
+      : draft.parsedBenefitType || 'cashback';
+    const fixedDiscountAmount = getReviewedDraftValue(
+      draft,
+      'fixedDiscountAmountReviewed',
+      'fixedDiscountAmount',
+      'parsedFixedDiscountAmount'
     );
     const amountThreshold = getReviewedDraftValue(
       draft,
@@ -417,13 +499,17 @@ function renderPromotionDrafts() {
     const sourceUrlMarkup = safeUrl
       ? `<a class="promotion-draft-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(draft.sourceUrl)}</a>`
       : `<span class="promotion-draft-link-text">${escapeHtml(draft.sourceUrl)}</span>`;
-    const acceptedIds = merchantId ? (acceptedPaymentMethodCache.get(String(merchantId)) || new Set()) : new Set();
-    const acceptanceHint = describeDraftAcceptanceState(merchantId, paymentMethodId, acceptedIds);
+    const sourceUpdatedNotice = draft.status === 'pending_review' &&
+      draft.reviewedAt &&
+      new Date(draft.fetchedAt) > new Date(draft.reviewedAt)
+      ? '<p class="promotion-draft-readonly-note">Source data was refreshed after the last review. Check the latest captured text and parsed values before publishing.</p>'
+      : '';
     const disabled = readOnly ? ' disabled' : '';
     const readOnlySummary = draft.status === 'published'
-      ? `<p class="promotion-draft-readonly-note">Published as reward rule #${escapeHtml(formatOptionalValue(draft.rewardRuleId))}.</p>`
+      ? '<p class="promotion-draft-readonly-note">Published as a canonical Promotion.</p>'
       : draft.status === 'rejected'
-        ? `<p class="promotion-draft-readonly-note">Rejected reason: ${escapeHtml(formatOptionalValue(draft.rejectionReason, 'Not provided'))}</p>`
+        ? `<p class="promotion-draft-readonly-note">Rejected reason: ${escapeHtml(formatOptionalValue(draft.rejectionReason, 'Not provided'))}</p>
+          <button type="button" class="secondary-button" data-action="reopen">Reopen for review</button>`
         : '';
 
     return `
@@ -444,24 +530,24 @@ function renderPromotionDrafts() {
           <h4>Captured source text</h4>
           <pre class="promotion-draft-source-content">${escapeHtml(draft.sourceContent)}</pre>
         </div>
+        ${sourceUpdatedNotice}
         <form class="promotion-draft-form" data-draft-id="${draft.id}" data-draft-status="${escapeHtml(draft.status)}">
           <div class="promotion-draft-grid">
+            ${renderPromotionScopeOptions({ draft, disabled: readOnly })}
             <label>
-              Merchant
-              <select name="merchantId"${disabled}>${renderDraftMerchantOptions(merchantId, readOnly)}</select>
-            </label>
-            <label>
-              Payment method
-              <select name="paymentMethodId"${disabled}>${renderDraftPaymentMethodOptions({
-                draft: { ...draft, merchantId },
-                acceptedIds,
-                selectedPaymentMethodId: paymentMethodId,
-                readOnly
-              })}</select>
+              Benefit type
+              <select name="benefitType"${disabled}>
+                <option value="cashback"${benefitType === 'cashback' ? ' selected' : ''}>Percentage cashback</option>
+                <option value="fixed_discount"${benefitType === 'fixed_discount' ? ' selected' : ''}>Fixed cash discount</option>
+              </select>
             </label>
             <label>
               Cashback rate
               <input name="cashbackRate" type="number" min="0" step="0.001" value="${escapeHtml(cashbackRate)}"${disabled} />
+            </label>
+            <label>
+              Fixed discount (TWD)
+              <input name="fixedDiscountAmount" type="number" min="1" step="1" value="${escapeHtml(fixedDiscountAmount)}"${disabled} />
             </label>
             <label>
               Amount threshold
@@ -477,14 +563,14 @@ function renderPromotionDrafts() {
             </label>
             <label class="promotion-draft-grid-wide">
               Review note
-              <textarea name="promotionNote" rows="3" maxlength="500"${disabled}>${escapeHtml(promotionNote)}</textarea>
+              <textarea name="promotionNote" rows="3" maxlength="500" placeholder="User-facing exclusions, limits, or quantity caveats"${disabled}>${escapeHtml(promotionNote)}</textarea>
             </label>
             <label class="promotion-draft-grid-wide">
               Reject reason
               <input name="rejectReason" type="text" maxlength="500" placeholder="Explain why this draft should be rejected"${readOnly ? ` value="${escapeHtml(draft.rejectionReason ?? '')}" disabled` : ''} />
             </label>
           </div>
-          <p class="promotion-draft-hint" data-role="acceptance-hint">${escapeHtml(acceptanceHint)}</p>
+          <p class="promotion-draft-hint">A Merchant's accepted payment methods are checked when recommendations are generated.</p>
           ${readOnlySummary}
           ${readOnly ? '' : `
             <div class="promotion-draft-actions">
@@ -497,6 +583,28 @@ function renderPromotionDrafts() {
       </article>
     `;
   }).join('');
+  promotionDraftsContainer.querySelectorAll('.promotion-draft-form').forEach(updatePromotionScopeControls);
+}
+
+function updatePromotionScopeControls(form) {
+  const editable = form.dataset.draftStatus === 'pending_review';
+  const originType = form.elements.namedItem('originType').value;
+  const eligibilityType = form.elements.namedItem('eligibilityType').value;
+  form.elements.namedItem('originMerchantId').disabled = !editable || originType !== 'merchant';
+  form.elements.namedItem('originOutletId').disabled = !editable || originType !== 'outlet';
+  const eligibilitySelect = form.elements.namedItem('eligibilityType');
+  eligibilitySelect.disabled = !editable || !originType;
+  [...eligibilitySelect.options].forEach((option) => {
+    option.disabled = option.value !== '' && (
+      (originType === 'merchant' && option.value === 'outlet') ||
+      (originType === 'outlet' && option.value !== 'outlet') ||
+      !originType
+    );
+  });
+  form.elements.namedItem('eligibleBranchIds').disabled =
+    !editable || originType !== 'merchant' || eligibilityType !== 'selected_branches';
+  form.elements.namedItem('excludedMerchantIds').disabled = !editable || originType !== 'outlet';
+  form.elements.namedItem('excludedBranchIds').disabled = !editable || originType !== 'outlet';
 }
 
 async function renderAcceptedPaymentMethods() {
@@ -509,7 +617,6 @@ async function renderAcceptedPaymentMethods() {
 
   const accepted = await fetchAcceptedPaymentMethods(merchantId);
   const acceptedIds = new Set(accepted.map((method) => method.id));
-  acceptedPaymentMethodCache.set(String(merchantId), new Set([...acceptedIds].map((id) => Number(id))));
 
   acceptedPaymentMethods.innerHTML = paymentMethods.length
     ? paymentMethods.map((method) => `
@@ -527,26 +634,29 @@ function setCatalogStatus(message, isError = false) {
 }
 
 async function refreshCatalog() {
-  const [merchantData, paymentMethodData, rewardRuleData, importRunData, promotionDraftData] = await Promise.all([
+  const [merchantData, paymentMethodData, rewardRuleData, importRunData, promotionDraftData, outletData] = await Promise.all([
     fetchMerchants(),
     fetchPaymentMethods(),
     fetchRewardRules(),
     fetchImportRuns(),
-    fetchPromotionDrafts()
+    fetchPromotionDrafts(),
+    fetchOutlets()
   ]);
   merchants = merchantData;
   paymentMethods = paymentMethodData;
+  physicalOutlets = outletData;
+  merchantBranches = (await Promise.all(merchants.map((merchant) => fetchMerchantBranches(merchant.id)))).flat();
   importRuns = importRunData;
   promotionDrafts = promotionDraftData;
-  acceptedPaymentMethodCache = new Map();
   renderMerchantOptions();
   renderPaymentMethodOptions();
   renderMerchants();
   renderPaymentMethods();
+  renderOutlets();
+  renderBranches();
   renderRewardRules(rewardRuleData);
   renderImportRuns();
   await renderAcceptedPaymentMethods();
-  await primePromotionDraftAcceptanceCache(promotionDrafts);
   renderPromotionDrafts();
   setCatalogStatus(`Loaded ${merchants.length} merchants, ${paymentMethods.length} payment methods, ${rewardRuleData.length} reward rules, ${importRuns.length} import runs, and ${promotionDrafts.length} imported promotion drafts.`);
 }
@@ -558,18 +668,31 @@ function getFormNumericValue(form, fieldName) {
 }
 
 function collectPromotionDraftReviewPayload(form) {
-  const merchantId = getFormNumericValue(form, 'merchantId');
-  const paymentMethodId = getFormNumericValue(form, 'paymentMethodId');
+  const selectedIds = (fieldName) => [...form.elements.namedItem(fieldName).selectedOptions].map((option) => Number(option.value));
+  const originMerchantId = getFormNumericValue(form, 'originMerchantId');
+  const originOutletId = getFormNumericValue(form, 'originOutletId');
+  const eligibleBranchIds = selectedIds('eligibleBranchIds');
+  const paymentMethodIds = selectedIds('paymentMethodIds');
+  const benefitType = form.elements.namedItem('benefitType').value;
   const cashbackRateRaw = form.elements.namedItem('cashbackRate').value.trim();
+  const fixedDiscountAmountRaw = form.elements.namedItem('fixedDiscountAmount').value.trim();
   const amountThresholdRaw = form.elements.namedItem('amountThreshold').value.trim();
   const validityStart = form.elements.namedItem('validityStart').value;
   const validityEnd = form.elements.namedItem('validityEnd').value;
   const promotionNote = form.elements.namedItem('promotionNote').value.trim();
 
   const payload = {
-    merchantId,
-    paymentMethodId,
+    originType: form.elements.namedItem('originType').value || null,
+    originMerchantId,
+    originOutletId,
+    eligibilityType: form.elements.namedItem('eligibilityType').value || null,
+    eligibleBranchIds,
+    excludedMerchantIds: selectedIds('excludedMerchantIds'),
+    excludedBranchIds: selectedIds('excludedBranchIds'),
+    paymentMethodIds,
+    benefitType,
     cashbackRate: cashbackRateRaw ? Number(cashbackRateRaw) : null,
+    fixedDiscountAmount: fixedDiscountAmountRaw ? Number(fixedDiscountAmountRaw) : null,
     amountThreshold: amountThresholdRaw ? Number(amountThresholdRaw) : null,
     validityStart: validityStart || null,
     validityEnd: validityEnd || null,
@@ -584,27 +707,6 @@ function setDraftFormPending(form, isPending) {
     button.disabled = isPending;
   });
   form.classList.toggle('is-pending', isPending);
-}
-
-async function syncDraftPaymentMethodOptions(form) {
-  const merchantId = getFormNumericValue(form, 'merchantId');
-  const paymentMethodSelect = form.elements.namedItem('paymentMethodId');
-  const selectedPaymentMethodId = paymentMethodSelect.value ? Number(paymentMethodSelect.value) : null;
-  const acceptedIds = merchantId ? await fetchAcceptedPaymentMethodIds(merchantId) : new Set();
-  const draft = promotionDrafts.find((item) => String(item.id) === form.dataset.draftId);
-
-  paymentMethodSelect.innerHTML = renderDraftPaymentMethodOptions({
-    draft: { ...(draft || {}), merchantId },
-    acceptedIds,
-    selectedPaymentMethodId,
-    readOnly: false
-  });
-
-  form.querySelector('[data-role="acceptance-hint"]').textContent = describeDraftAcceptanceState(
-    merchantId,
-    paymentMethodSelect.value ? Number(paymentMethodSelect.value) : null,
-    acceptedIds
-  );
 }
 
 connectAdminButton.addEventListener('click', connectAdmin);
@@ -655,9 +757,19 @@ rewardRuleForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(rewardRuleForm);
   const payload = Object.fromEntries(formData.entries());
+  const merchant = merchants.find((item) => String(item.id) === String(payload.merchantName));
+  payload.merchantName = merchant?.name || '';
   payload.paymentMethodId = Number(payload.paymentMethodId);
-  payload.cashbackRate = Number(payload.cashbackRate);
+  payload.outletId = payload.outletId ? Number(payload.outletId) : null;
+  if (payload.benefitType === 'cashback') {
+    payload.cashbackRate = Number(payload.cashbackRate);
+    delete payload.fixedDiscountAmount;
+  } else {
+    payload.fixedDiscountAmount = Number(payload.fixedDiscountAmount);
+    delete payload.cashbackRate;
+  }
   payload.amountThreshold = Number(payload.amountThreshold);
+  payload.sourceUrl = String(payload.sourceUrl || '').trim() || null;
 
   try {
     await requestJson('/api/admin/reward-rules', {
@@ -669,6 +781,49 @@ rewardRuleForm.addEventListener('submit', async (event) => {
     document.getElementById('validity-end').value = today;
     await refreshCatalog();
     setCatalogStatus('Added reward rule.');
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+benefitTypeSelect.addEventListener('change', syncBenefitInputs);
+document.getElementById('rule-merchant').addEventListener('change', () => {
+  renderOutletOptions(ruleOutletSelect, ruleMerchantSelect.value, null);
+});
+
+physicalOutletForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const name = document.getElementById('physical-outlet-name').value.trim();
+  const location = document.getElementById('physical-outlet-location').value.trim();
+
+  try {
+    await requestJson('/api/admin/outlets', {
+      method: 'POST',
+      body: JSON.stringify({ name, location: location || undefined })
+    });
+    physicalOutletForm.reset();
+    await refreshCatalog();
+    setCatalogStatus(`Added shopping Outlet "${name}".`);
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+branchForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const merchantId = branchMerchantSelect.value;
+  const name = document.getElementById('branch-name').value.trim();
+  const location = document.getElementById('branch-location').value.trim();
+  const outletId = branchOutletSelect.value ? Number(branchOutletSelect.value) : null;
+
+  try {
+    await requestJson(`/api/admin/merchants/${encodeURIComponent(merchantId)}/branches`, {
+      method: 'POST',
+      body: JSON.stringify({ name, location: location || undefined, outletId })
+    });
+    branchForm.reset();
+    await refreshCatalog();
+    setCatalogStatus(`Added merchant branch "${name}".`);
   } catch (error) {
     setCatalogStatus(error.message, true);
   }
@@ -765,14 +920,87 @@ acceptedPaymentMethods.addEventListener('change', async (event) => {
       `/api/admin/merchants/${encodeURIComponent(merchantId)}/payment-methods/${encodeURIComponent(paymentMethodId)}`,
       { method: checkbox.checked ? 'PUT' : 'DELETE' }
     );
-    acceptedPaymentMethodCache.delete(String(merchantId));
     await renderAcceptedPaymentMethods();
-    renderPromotionDrafts();
     setCatalogStatus('Updated accepted payment methods.');
   } catch (error) {
     checkbox.checked = !checkbox.checked;
     setCatalogStatus(error.message, true);
   }
+});
+
+promotionDraftsContainer.addEventListener('change', (event) => {
+  const form = event.target.closest('.promotion-draft-form');
+  if (!form) {
+    return;
+  }
+
+  const originType = form.elements.namedItem('originType');
+  const originMerchantId = form.elements.namedItem('originMerchantId');
+  const originOutletId = form.elements.namedItem('originOutletId');
+  const eligibilityType = form.elements.namedItem('eligibilityType');
+  const eligibleBranchIds = form.elements.namedItem('eligibleBranchIds');
+  const excludedBranchIds = form.elements.namedItem('excludedBranchIds');
+
+  if (event.target === originType) {
+    if (originType.value === 'merchant') {
+      originOutletId.value = '';
+      if (eligibilityType.value === 'outlet') {
+        eligibilityType.value = 'merchant_wide';
+      }
+      [...eligibleBranchIds.options].forEach((option) => {
+        option.selected = false;
+      });
+      [...form.elements.namedItem('excludedMerchantIds').options].forEach((option) => {
+        option.selected = false;
+      });
+      [...excludedBranchIds.options].forEach((option) => {
+        option.selected = false;
+      });
+    } else if (originType.value === 'outlet') {
+      originMerchantId.value = '';
+      eligibilityType.value = 'outlet';
+      [...eligibleBranchIds.options].forEach((option) => {
+        option.selected = false;
+      });
+    } else {
+      originMerchantId.value = '';
+      originOutletId.value = '';
+      eligibilityType.value = '';
+      [...eligibleBranchIds.options].forEach((option) => {
+        option.selected = false;
+      });
+      [...form.elements.namedItem('excludedMerchantIds').options].forEach((option) => {
+        option.selected = false;
+      });
+      [...excludedBranchIds.options].forEach((option) => {
+        option.selected = false;
+      });
+    }
+  }
+
+  if (event.target === eligibilityType && eligibilityType.value !== 'selected_branches') {
+    [...eligibleBranchIds.options].forEach((option) => {
+      option.selected = false;
+    });
+  }
+
+  if (event.target === originMerchantId) {
+    [...eligibleBranchIds.options].forEach((option) => {
+      if (option.dataset.merchantId !== originMerchantId.value) {
+        option.selected = false;
+      }
+    });
+  }
+
+  if (event.target === originOutletId && originOutletId.value) {
+    [...excludedBranchIds.options].forEach((option) => {
+      if (option.dataset.outletId !== originOutletId.value) {
+        option.selected = false;
+      }
+    });
+  }
+
+  updatePromotionScopeControls(form);
 });
 
 rewardRules.addEventListener('click', async (event) => {
@@ -795,32 +1023,6 @@ rewardRules.addEventListener('click', async (event) => {
 promotionDraftStatusFilter.addEventListener('change', async () => {
   try {
     await refreshCatalog();
-  } catch (error) {
-    setCatalogStatus(error.message, true);
-  }
-});
-
-promotionDraftsContainer.addEventListener('change', async (event) => {
-  const form = event.target.closest('.promotion-draft-form');
-  if (!form) {
-    return;
-  }
-
-  try {
-    if (event.target.name === 'merchantId') {
-      await syncDraftPaymentMethodOptions(form);
-      return;
-    }
-
-    if (event.target.name === 'paymentMethodId') {
-      const merchantId = getFormNumericValue(form, 'merchantId');
-      const acceptedIds = merchantId ? await fetchAcceptedPaymentMethodIds(merchantId) : new Set();
-      form.querySelector('[data-role="acceptance-hint"]').textContent = describeDraftAcceptanceState(
-        merchantId,
-        getFormNumericValue(form, 'paymentMethodId'),
-        acceptedIds
-      );
-    }
   } catch (error) {
     setCatalogStatus(error.message, true);
   }
@@ -863,7 +1065,18 @@ promotionDraftsContainer.addEventListener('click', async (event) => {
         body: JSON.stringify({})
       });
       await refreshCatalog();
-      setCatalogStatus(`Published draft #${draftId} as reward rule #${response.data.rewardRuleId}.`);
+      setCatalogStatus(`Published draft #${draftId} as Promotion #${response.data.promotion.id}.`);
+      return;
+    }
+
+    if (action === 'reopen') {
+      await requestJson(`/api/admin/promotion-drafts/${encodeURIComponent(draftId)}/reopen`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      promotionDraftStatusFilter.value = 'pending_review';
+      await refreshCatalog();
+      setCatalogStatus(`Reopened draft #${draftId} for review.`);
       return;
     }
 

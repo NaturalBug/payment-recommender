@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { RepositoryConflictError, RepositoryValidationError } from './errors';
+import { promotionSelect, toPromotionRecord } from './promotionRepository';
 import type {
   ImportRunRecord,
   ImportRunStatus,
@@ -9,8 +10,7 @@ import type {
   PromotionDraftRecord,
   PromotionDraftReviewInput,
   PromotionDraftStatus,
-  PublishedDraftResult,
-  RewardRuleRecord
+  PublishedDraftResult
 } from './types';
 
 type ImportRunRow = {
@@ -33,36 +33,39 @@ type PromotionDraftRow = {
   sourceContent: string;
   fetchedAt: Date;
   parsedCashbackRate: unknown;
+  parsedBenefitType: string | null;
+  parsedFixedDiscountAmount: number | null;
   parsedAmountThreshold: number | null;
   parsedValidityStart: Date | null;
   parsedValidityEnd: Date | null;
   cashbackRateReviewed: boolean;
+  benefitTypeReviewed: boolean;
+  fixedDiscountAmountReviewed: boolean;
   amountThresholdReviewed: boolean;
   validityStartReviewed: boolean;
   validityEndReviewed: boolean;
   status: string;
+  originType: string | null;
+  originMerchantId: number | null;
+  originOutletId: number | null;
+  eligibilityType: string | null;
+  eligibleBranches: { branchId: number }[];
+  excludedMerchants: { merchantId: number }[];
+  excludedBranches: { branchId: number }[];
+  paymentMethods: { paymentMethodId: number }[];
   merchantId: number | null;
   paymentMethodId: number | null;
+  benefitType: string;
   cashbackRate: unknown;
+  fixedDiscountAmount: number | null;
   amountThreshold: number | null;
   validityStart: Date | null;
   validityEnd: Date | null;
   promotionNote: string | null;
+  branchId: number | null;
   rewardRuleId: number | null;
   reviewedAt: Date | null;
   rejectionReason: string | null;
-};
-
-type RewardRuleRow = {
-  id: number;
-  merchantId: number;
-  paymentMethodId: number;
-  cashbackRate: unknown;
-  amountThreshold: number;
-  validityStart: Date;
-  validityEnd: Date;
-  promotionNote: string | null;
-  paymentMethod: { name: string };
 };
 
 type PendingDraftWriteResult =
@@ -92,38 +95,39 @@ const promotionDraftSelect = {
   sourceContent: true,
   fetchedAt: true,
   parsedCashbackRate: true,
+  parsedBenefitType: true,
+  parsedFixedDiscountAmount: true,
   parsedAmountThreshold: true,
   parsedValidityStart: true,
   parsedValidityEnd: true,
   cashbackRateReviewed: true,
+  benefitTypeReviewed: true,
+  fixedDiscountAmountReviewed: true,
   amountThresholdReviewed: true,
   validityStartReviewed: true,
   validityEndReviewed: true,
   status: true,
+  originType: true,
+  originMerchantId: true,
+  originOutletId: true,
+  eligibilityType: true,
+  eligibleBranches: { select: { branchId: true } },
+  excludedMerchants: { select: { merchantId: true } },
+  excludedBranches: { select: { branchId: true } },
+  paymentMethods: { select: { paymentMethodId: true } },
   merchantId: true,
   paymentMethodId: true,
+  benefitType: true,
   cashbackRate: true,
+  fixedDiscountAmount: true,
   amountThreshold: true,
   validityStart: true,
   validityEnd: true,
   promotionNote: true,
+  branchId: true,
   rewardRuleId: true,
   reviewedAt: true,
   rejectionReason: true
-} as const;
-
-const rewardRuleSelect = {
-  id: true,
-  merchantId: true,
-  paymentMethodId: true,
-  cashbackRate: true,
-  amountThreshold: true,
-  validityStart: true,
-  validityEnd: true,
-  promotionNote: true,
-  paymentMethod: {
-    select: { name: true }
-  }
 } as const;
 
 function toNullableNumber(value: unknown): number | null {
@@ -157,38 +161,39 @@ function toPromotionDraftRecord(row: PromotionDraftRow): PromotionDraftRecord {
     sourceContent: row.sourceContent,
     fetchedAt: row.fetchedAt,
     parsedCashbackRate: toNullableNumber(row.parsedCashbackRate),
+    parsedBenefitType: row.parsedBenefitType as PromotionDraftRecord['parsedBenefitType'],
+    parsedFixedDiscountAmount: row.parsedFixedDiscountAmount,
     parsedAmountThreshold: row.parsedAmountThreshold,
     parsedValidityStart: row.parsedValidityStart,
     parsedValidityEnd: row.parsedValidityEnd,
     cashbackRateReviewed: row.cashbackRateReviewed,
+    benefitTypeReviewed: row.benefitTypeReviewed,
+    fixedDiscountAmountReviewed: row.fixedDiscountAmountReviewed,
     amountThresholdReviewed: row.amountThresholdReviewed,
     validityStartReviewed: row.validityStartReviewed,
     validityEndReviewed: row.validityEndReviewed,
     status: row.status as PromotionDraftStatus,
+    originType: row.originType as PromotionDraftRecord['originType'],
+    originMerchantId: row.originMerchantId,
+    originOutletId: row.originOutletId,
+    eligibilityType: row.eligibilityType as PromotionDraftRecord['eligibilityType'],
+    eligibleBranchIds: row.eligibleBranches.map(({ branchId }) => branchId),
+    excludedMerchantIds: row.excludedMerchants.map(({ merchantId }) => merchantId),
+    excludedBranchIds: row.excludedBranches.map(({ branchId }) => branchId),
+    paymentMethodIds: row.paymentMethods.map(({ paymentMethodId }) => paymentMethodId),
     merchantId: row.merchantId,
     paymentMethodId: row.paymentMethodId,
+    benefitType: row.benefitType as PromotionDraftRecord['benefitType'],
     cashbackRate: toNullableNumber(row.cashbackRate),
+    fixedDiscountAmount: row.fixedDiscountAmount,
     amountThreshold: row.amountThreshold,
     validityStart: row.validityStart,
     validityEnd: row.validityEnd,
     promotionNote: row.promotionNote,
+    outletId: row.branchId,
     rewardRuleId: row.rewardRuleId,
     reviewedAt: row.reviewedAt,
     rejectionReason: row.rejectionReason
-  };
-}
-
-function toRewardRuleRecord(row: RewardRuleRow): RewardRuleRecord {
-  return {
-    id: row.id,
-    merchantId: row.merchantId,
-    paymentMethodId: row.paymentMethodId,
-    paymentMethodName: row.paymentMethod.name,
-    cashbackRate: Number(row.cashbackRate),
-    amountThreshold: row.amountThreshold,
-    validityStart: row.validityStart,
-    validityEnd: row.validityEnd,
-    promotionNote: row.promotionNote
   };
 }
 
@@ -198,28 +203,40 @@ function ensureDraftIsEditable(draft: PromotionDraftRow): void {
   }
 }
 
-function validateReviewedRewardFields(draft: PromotionDraftRow): asserts draft is PromotionDraftRow & {
-  merchantId: number;
-  paymentMethodId: number;
-  cashbackRate: unknown;
+function validateReviewedPromotion(draft: PromotionDraftRow): asserts draft is PromotionDraftRow & {
+  originType: 'merchant' | 'outlet';
+  eligibilityType: 'merchant_wide' | 'selected_branches' | 'outlet';
+  benefitType: 'cashback' | 'fixed_discount';
   amountThreshold: number;
   validityStart: Date;
   validityEnd: Date;
 } {
-  const merchantId = draft.merchantId;
-  const paymentMethodId = draft.paymentMethodId;
+  const validMerchantOrigin =
+    draft.originType === 'merchant' &&
+    draft.originMerchantId !== null &&
+    draft.originOutletId === null;
+  const validOutletOrigin =
+    draft.originType === 'outlet' &&
+    draft.originOutletId !== null &&
+    draft.originMerchantId === null;
+  const validEligibility =
+    (draft.originType === 'merchant' &&
+      (draft.eligibilityType === 'merchant_wide' || draft.eligibilityType === 'selected_branches')) ||
+    (draft.originType === 'outlet' && draft.eligibilityType === 'outlet');
   const cashbackRate = toNullableNumber(draft.cashbackRate);
 
   if (
-    typeof merchantId !== 'number' ||
-    !Number.isInteger(merchantId) ||
-    merchantId <= 0 ||
-    typeof paymentMethodId !== 'number' ||
-    !Number.isInteger(paymentMethodId) ||
-    paymentMethodId <= 0 ||
-    cashbackRate === null ||
-    !Number.isFinite(cashbackRate) ||
-    cashbackRate < 0 ||
+    (!validMerchantOrigin && !validOutletOrigin) ||
+    !validEligibility ||
+    (draft.eligibilityType === 'selected_branches' && draft.eligibleBranches.length === 0) ||
+    draft.paymentMethods.length === 0 ||
+    (draft.benefitType !== 'cashback' && draft.benefitType !== 'fixed_discount') ||
+    (draft.benefitType === 'cashback' &&
+      (cashbackRate === null || !Number.isFinite(cashbackRate) || cashbackRate < 0)) ||
+    (draft.benefitType === 'fixed_discount' &&
+      (draft.fixedDiscountAmount === null ||
+        !Number.isInteger(draft.fixedDiscountAmount) ||
+        draft.fixedDiscountAmount <= 0)) ||
     draft.amountThreshold === null ||
     !Number.isInteger(draft.amountThreshold) ||
     draft.amountThreshold < 0 ||
@@ -229,7 +246,7 @@ function validateReviewedRewardFields(draft: PromotionDraftRow): asserts draft i
     Number.isNaN(draft.validityEnd.getTime()) ||
     draft.validityEnd < draft.validityStart
   ) {
-    throw new RepositoryValidationError('promotion draft is missing reviewed reward values');
+    throw new RepositoryValidationError('promotion draft is missing reviewed scope or reward values');
   }
 }
 
@@ -243,30 +260,67 @@ function toDraftCreateData(input: ImportedPromotionDraft): Prisma.PromotionDraft
     sourceContent: input.sourceContent,
     fetchedAt: input.fetchedAt,
     parsedCashbackRate: input.parsedCashbackRate ?? null,
+    parsedBenefitType: input.parsedBenefitType ?? null,
+    parsedFixedDiscountAmount: input.parsedFixedDiscountAmount ?? null,
     parsedAmountThreshold: input.parsedAmountThreshold ?? null,
     parsedValidityStart: input.parsedValidityStart ?? null,
     parsedValidityEnd: input.parsedValidityEnd ?? null
   };
 }
 
-function toDraftUpdateData(input: ImportedPromotionDraft): Prisma.PromotionDraftUncheckedUpdateInput {
-  return {
+function hasParsedNumberChanged(current: unknown, next: number | null | undefined): boolean {
+  const currentValue = current === null || current === undefined ? null : Number(current);
+  return currentValue !== (next ?? null);
+}
+
+function hasParsedDateChanged(current: Date | null, next: Date | null | undefined): boolean {
+  return (current?.getTime() ?? null) !== (next?.getTime() ?? null);
+}
+
+function toDraftUpdateData(
+  input: ImportedPromotionDraft,
+  existingDraft: PromotionDraftRow
+): Prisma.PromotionDraftUncheckedUpdateInput {
+  const data: Prisma.PromotionDraftUncheckedUpdateInput = {
     importRunId: input.importRunId,
     sourceUrl: input.sourceUrl,
     sourceTitle: input.sourceTitle,
     sourceContent: input.sourceContent,
     fetchedAt: input.fetchedAt,
     parsedCashbackRate: input.parsedCashbackRate ?? null,
+    parsedBenefitType: input.parsedBenefitType ?? null,
+    parsedFixedDiscountAmount: input.parsedFixedDiscountAmount ?? null,
     parsedAmountThreshold: input.parsedAmountThreshold ?? null,
     parsedValidityStart: input.parsedValidityStart ?? null,
     parsedValidityEnd: input.parsedValidityEnd ?? null
   };
+
+  if (existingDraft.parsedBenefitType !== (input.parsedBenefitType ?? null)) {
+    data.benefitTypeReviewed = false;
+  }
+  if (hasParsedNumberChanged(existingDraft.parsedCashbackRate, input.parsedCashbackRate)) {
+    data.cashbackRateReviewed = false;
+  }
+  if (hasParsedNumberChanged(existingDraft.parsedFixedDiscountAmount, input.parsedFixedDiscountAmount)) {
+    data.fixedDiscountAmountReviewed = false;
+  }
+  if (hasParsedNumberChanged(existingDraft.parsedAmountThreshold, input.parsedAmountThreshold)) {
+    data.amountThresholdReviewed = false;
+  }
+  if (hasParsedDateChanged(existingDraft.parsedValidityStart, input.parsedValidityStart)) {
+    data.validityStartReviewed = false;
+  }
+  if (hasParsedDateChanged(existingDraft.parsedValidityEnd, input.parsedValidityEnd)) {
+    data.validityEndReviewed = false;
+  }
+
+  return data;
 }
 
 function mapPrismaError(error: unknown, foreignKeyConflictMessage?: string): never {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === 'P2002') {
-      throw new RepositoryConflictError('reward rule conflicts with an existing record');
+      throw new RepositoryConflictError('promotion already exists for this draft');
     }
 
     if (error.code === 'P2003') {
@@ -286,18 +340,52 @@ function mapPrismaError(error: unknown, foreignKeyConflictMessage?: string): nev
 
 async function writePendingDraft(
   id: number,
-  data: Prisma.PromotionDraftUncheckedUpdateInput
+  data: Prisma.PromotionDraftUncheckedUpdateInput,
+  scope?: PromotionDraftReviewInput
 ): Promise<PendingDraftWriteResult> {
   return prisma.$transaction(async (transaction) => {
+    const previousDraft = await transaction.promotionDraft.findUnique({
+      where: { id },
+      select: {
+        originType: true,
+        originMerchantId: true,
+        originOutletId: true,
+        eligibilityType: true
+      }
+    });
+    const updateData = { ...data };
+    if (scope?.originType !== undefined) {
+      if (scope.originType === 'merchant') {
+        if (scope.originOutletId != null) {
+          throw new RepositoryValidationError('merchant origin cannot include an origin outlet');
+        }
+        updateData.originOutletId = null;
+      } else if (scope.originType === 'outlet') {
+        if (scope.originMerchantId != null) {
+          throw new RepositoryValidationError('outlet origin cannot include an origin merchant');
+        }
+        updateData.originMerchantId = null;
+      } else {
+        updateData.originMerchantId = null;
+        updateData.originOutletId = null;
+      }
+      if (scope.originType === null || scope.originType !== previousDraft?.originType) {
+        updateData.eligibilityType = scope.eligibilityType ?? null;
+      }
+    }
+
     const updatedDrafts = await transaction.promotionDraft.updateMany({
       where: {
         id,
         status: 'pending_review'
       },
-      data
+      data: updateData
     });
 
     if (updatedDrafts.count === 1) {
+      if (scope) {
+        await replaceDraftScope(transaction, id, scope, previousDraft);
+      }
       const updatedDraft = await transaction.promotionDraft.findUniqueOrThrow({
         where: { id },
         select: promotionDraftSelect
@@ -317,6 +405,143 @@ async function writePendingDraft(
 
     return { kind: 'finalized', draft: currentDraft };
   });
+}
+
+function validateScopeIds(values: number[] | undefined, field: string): number[] | undefined {
+  if (values === undefined) return undefined;
+  if (
+    !Array.isArray(values) ||
+    values.some((value) => !Number.isSafeInteger(value) || value <= 0) ||
+    new Set(values).size !== values.length
+  ) {
+    throw new RepositoryValidationError(`${field} must contain unique positive integer IDs`);
+  }
+  return values;
+}
+
+async function replaceDraftScope(
+  transaction: Prisma.TransactionClient,
+  draftId: number,
+  input: PromotionDraftReviewInput,
+  previousDraft: {
+    originType: string | null;
+    originMerchantId: number | null;
+    originOutletId: number | null;
+    eligibilityType: string | null;
+  } | null
+): Promise<void> {
+  const suppliedEligibleBranchIds = validateScopeIds(input.eligibleBranchIds, 'eligibleBranchIds');
+  const suppliedExcludedMerchantIds = validateScopeIds(input.excludedMerchantIds, 'excludedMerchantIds');
+  const suppliedExcludedBranchIds = validateScopeIds(input.excludedBranchIds, 'excludedBranchIds');
+  const paymentMethodIds = validateScopeIds(input.paymentMethodIds, 'paymentMethodIds');
+  const originType = input.originType !== undefined ? input.originType : previousDraft?.originType;
+  const originMerchantId =
+    input.originMerchantId !== undefined ? input.originMerchantId : previousDraft?.originMerchantId;
+  const originOutletId =
+    input.originOutletId !== undefined ? input.originOutletId : previousDraft?.originOutletId;
+  const eligibilityType =
+    input.eligibilityType !== undefined ? input.eligibilityType : previousDraft?.eligibilityType;
+  const eligibleBranchIds = suppliedEligibleBranchIds ?? (
+    originType !== 'merchant' ||
+    eligibilityType !== 'selected_branches' ||
+    originMerchantId !== previousDraft?.originMerchantId
+      ? []
+      : undefined
+  );
+  const excludedMerchantIds = suppliedExcludedMerchantIds ?? (originType === 'outlet' ? undefined : []);
+  const excludedBranchIds = suppliedExcludedBranchIds ?? (
+    originType !== 'outlet' || originOutletId !== previousDraft?.originOutletId ? [] : undefined
+  );
+
+  if (originMerchantId != null) {
+    const merchant = await transaction.merchant.findUnique({
+      where: { id: originMerchantId },
+      select: { id: true }
+    });
+    if (!merchant) throw new RepositoryValidationError('origin merchant is invalid');
+  }
+  if (originOutletId != null) {
+    const outlet = await transaction.outlet.findUnique({
+      where: { id: originOutletId },
+      select: { id: true }
+    });
+    if (!outlet) throw new RepositoryValidationError('origin outlet is invalid');
+  }
+  if (originType === 'merchant' && originMerchantId == null) {
+    throw new RepositoryValidationError('merchant origin requires an origin merchant');
+  }
+  if (originType === 'outlet' && originOutletId == null) {
+    throw new RepositoryValidationError('outlet origin requires an origin outlet');
+  }
+
+  if (eligibleBranchIds !== undefined) {
+    const branches = await transaction.merchantBranch.findMany({
+      where: { id: { in: eligibleBranchIds } },
+      select: { id: true, merchantId: true }
+    });
+    if (branches.length !== eligibleBranchIds.length) {
+      throw new RepositoryValidationError('eligible branches contain an unknown ID');
+    }
+    if (
+      originType === 'merchant' &&
+      typeof originMerchantId === 'number' &&
+      branches.some((branch) => branch.merchantId !== originMerchantId)
+    ) {
+      throw new RepositoryValidationError('eligible branches must belong to the origin merchant');
+    }
+  }
+
+  if (excludedBranchIds !== undefined) {
+    const count = await transaction.merchantBranch.count({ where: { id: { in: excludedBranchIds } } });
+    if (count !== excludedBranchIds.length) {
+      throw new RepositoryValidationError('excluded branches contain an unknown ID');
+    }
+  }
+  if (excludedMerchantIds !== undefined) {
+    const count = await transaction.merchant.count({ where: { id: { in: excludedMerchantIds } } });
+    if (count !== excludedMerchantIds.length) {
+      throw new RepositoryValidationError('excluded merchants contain an unknown ID');
+    }
+  }
+  if (paymentMethodIds !== undefined) {
+    const count = await transaction.paymentMethod.count({ where: { id: { in: paymentMethodIds } } });
+    if (count !== paymentMethodIds.length) {
+      throw new RepositoryValidationError('payment methods contain an unknown ID');
+    }
+  }
+
+  if (eligibleBranchIds !== undefined) {
+    await transaction.promotionDraftEligibleBranch.deleteMany({ where: { draftId } });
+    if (eligibleBranchIds.length) {
+      await transaction.promotionDraftEligibleBranch.createMany({
+        data: eligibleBranchIds.map((branchId) => ({ draftId, branchId }))
+      });
+    }
+  }
+  if (excludedMerchantIds !== undefined) {
+    await transaction.promotionDraftExcludedMerchant.deleteMany({ where: { draftId } });
+    if (excludedMerchantIds.length) {
+      await transaction.promotionDraftExcludedMerchant.createMany({
+        data: excludedMerchantIds.map((merchantId) => ({ draftId, merchantId }))
+      });
+    }
+  }
+  if (excludedBranchIds !== undefined) {
+    await transaction.promotionDraftExcludedBranch.deleteMany({ where: { draftId } });
+    if (excludedBranchIds.length) {
+      await transaction.promotionDraftExcludedBranch.createMany({
+        data: excludedBranchIds.map((branchId) => ({ draftId, branchId }))
+      });
+    }
+  }
+  if (paymentMethodIds !== undefined) {
+    await transaction.promotionDraftPaymentMethod.deleteMany({ where: { draftId } });
+    if (paymentMethodIds.length) {
+      await transaction.promotionDraftPaymentMethod.createMany({
+        data: paymentMethodIds.map((paymentMethodId) => ({ draftId, paymentMethodId }))
+      });
+    }
+  }
 }
 
 export async function createImportRun(source: ImportSource): Promise<ImportRunRecord> {
@@ -375,7 +600,7 @@ export async function upsertPendingDraft(input: ImportedPromotionDraft): Promise
     }
 
     try {
-      const updatedDraft = await writePendingDraft(existingDraft.id, toDraftUpdateData(input));
+      const updatedDraft = await writePendingDraft(existingDraft.id, toDraftUpdateData(input, existingDraft));
 
       if (updatedDraft.kind === 'missing') {
         throw new RepositoryValidationError('promotion draft not found');
@@ -417,7 +642,7 @@ export async function upsertPendingDraft(input: ImportedPromotionDraft): Promise
         return toPromotionDraftRecord(duplicateDraft);
       }
 
-      const updatedDraft = await writePendingDraft(duplicateDraft.id, toDraftUpdateData(input));
+      const updatedDraft = await writePendingDraft(duplicateDraft.id, toDraftUpdateData(input, duplicateDraft));
 
       if (updatedDraft.kind === 'missing') {
         throw new RepositoryValidationError('promotion draft not found');
@@ -460,9 +685,21 @@ export async function updatePromotionDraft(
 
   if (input.merchantId !== undefined) data.merchantId = input.merchantId;
   if (input.paymentMethodId !== undefined) data.paymentMethodId = input.paymentMethodId;
+  if (input.originType !== undefined) data.originType = input.originType;
+  if (input.originMerchantId !== undefined) data.originMerchantId = input.originMerchantId;
+  if (input.originOutletId !== undefined) data.originOutletId = input.originOutletId;
+  if (input.eligibilityType !== undefined) data.eligibilityType = input.eligibilityType;
+  if (input.benefitType !== undefined) {
+    data.benefitType = input.benefitType ?? 'cashback';
+    data.benefitTypeReviewed = input.benefitType !== null;
+  }
   if (input.cashbackRate !== undefined) {
     data.cashbackRate = input.cashbackRate;
     data.cashbackRateReviewed = true;
+  }
+  if (input.fixedDiscountAmount !== undefined) {
+    data.fixedDiscountAmount = input.fixedDiscountAmount;
+    data.fixedDiscountAmountReviewed = true;
   }
   if (input.amountThreshold !== undefined) {
     data.amountThreshold = input.amountThreshold;
@@ -477,9 +714,10 @@ export async function updatePromotionDraft(
     data.validityEndReviewed = true;
   }
   if (input.promotionNote !== undefined) data.promotionNote = input.promotionNote;
+  if (input.outletId !== undefined) data.branchId = input.outletId;
 
   try {
-    const updatedDraft = await writePendingDraft(id, data);
+    const updatedDraft = await writePendingDraft(id, data, input);
 
     if (updatedDraft.kind === 'missing') {
       return null;
@@ -493,6 +731,27 @@ export async function updatePromotionDraft(
   } catch (error) {
     mapPrismaError(error);
   }
+}
+
+export async function reopenPromotionDraft(id: number): Promise<PromotionDraftRecord | null> {
+  return prisma.$transaction(async (transaction) => {
+    const result = await transaction.promotionDraft.updateMany({
+      where: { id, status: 'rejected' },
+      data: { status: 'pending_review', reviewedAt: null }
+    });
+
+    if (result.count === 1) {
+      const draft = await transaction.promotionDraft.findUniqueOrThrow({
+        where: { id },
+        select: promotionDraftSelect
+      });
+      return toPromotionDraftRecord(draft);
+    }
+
+    const existing = await transaction.promotionDraft.findUnique({ where: { id }, select: { status: true } });
+    if (!existing) return null;
+    throw new RepositoryConflictError('only rejected promotion drafts can be reopened');
+  });
 }
 
 export async function rejectPromotionDraft(id: number, reason: string): Promise<PromotionDraftRecord | null> {
@@ -532,54 +791,84 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
       }
 
       ensureDraftIsEditable(draft);
-      validateReviewedRewardFields(draft);
-
-      const [merchant, paymentMethod, acceptance] = await Promise.all([
-        transaction.merchant.findUnique({
-          where: { id: draft.merchantId },
-          select: { id: true }
-        }),
-        transaction.paymentMethod.findUnique({
-          where: { id: draft.paymentMethodId },
-          select: { id: true }
-        }),
-        transaction.merchantPaymentAcceptance.findUnique({
-          where: {
-            merchantId_paymentMethodId: {
-              merchantId: draft.merchantId,
-              paymentMethodId: draft.paymentMethodId
-            }
-          },
-          select: { id: true }
-        })
-      ]);
-
-      if (!merchant || !paymentMethod) {
-        throw new RepositoryConflictError('merchant or payment method is no longer available');
+      validateReviewedPromotion(draft);
+      const origin = draft.originType === 'merchant'
+        ? await transaction.merchant.findUnique({
+            where: { id: draft.originMerchantId! },
+            select: { id: true }
+          })
+        : await transaction.outlet.findUnique({
+            where: { id: draft.originOutletId! },
+            select: { id: true }
+          });
+      if (!origin) {
+        throw new RepositoryConflictError('promotion origin is no longer available');
       }
-
-      if (!acceptance) {
-        throw new RepositoryConflictError('payment method is not accepted by this merchant');
+      const paymentMethodIds = draft.paymentMethods.map(({ paymentMethodId }) => paymentMethodId);
+      const paymentMethodCount = await transaction.paymentMethod.count({
+        where: { id: { in: paymentMethodIds } }
+      });
+      if (paymentMethodCount !== paymentMethodIds.length) {
+        throw new RepositoryConflictError('selected payment methods are no longer available');
       }
-
-      const rewardRule = await transaction.rewardRule.create({
+      const eligibleBranchIds = draft.eligibleBranches.map(({ branchId }) => branchId);
+      const excludedBranchIds = draft.excludedBranches.map(({ branchId }) => branchId);
+      if (draft.originType === 'merchant' && eligibleBranchIds.length) {
+        const branchCount = await transaction.merchantBranch.count({
+          where: { id: { in: eligibleBranchIds }, merchantId: draft.originMerchantId! }
+        });
+        if (branchCount !== eligibleBranchIds.length) {
+          throw new RepositoryValidationError('eligible branches must belong to the origin merchant');
+        }
+      }
+      if (draft.originType === 'outlet' && excludedBranchIds.length) {
+        const branchCount = await transaction.merchantBranch.count({
+          where: { id: { in: excludedBranchIds }, outletId: draft.originOutletId! }
+        });
+        if (branchCount !== excludedBranchIds.length) {
+          throw new RepositoryValidationError('excluded branches must belong to the origin outlet');
+        }
+      }
+      const promotion = await transaction.promotion.create({
         data: {
-          merchantId: draft.merchantId,
-          paymentMethodId: draft.paymentMethodId,
-          cashbackRate: Number(draft.cashbackRate),
+          sourceDraft: { connect: { id: draft.id } },
+          originType: draft.originType,
+          originMerchant: draft.originMerchantId ? { connect: { id: draft.originMerchantId } } : undefined,
+          originOutlet: draft.originOutletId ? { connect: { id: draft.originOutletId } } : undefined,
+          eligibilityType: draft.eligibilityType,
+          benefitType: draft.benefitType,
+          cashbackRate: draft.benefitType === 'cashback' ? Number(draft.cashbackRate) : null,
+          fixedDiscountAmount: draft.benefitType === 'fixed_discount' ? draft.fixedDiscountAmount : null,
           amountThreshold: draft.amountThreshold,
           validityStart: draft.validityStart,
           validityEnd: draft.validityEnd,
-          promotionNote: draft.promotionNote
+          promotionNote: draft.promotionNote,
+          sourceUrl: draft.sourceUrl,
+          sourceTitle: draft.sourceTitle,
+          paymentMethods: {
+            create: draft.paymentMethods.map(({ paymentMethodId }) => ({
+              paymentMethod: { connect: { id: paymentMethodId } }
+            }))
+          },
+          eligibleBranches: {
+            create: eligibleBranchIds.map((branchId) => ({ branch: { connect: { id: branchId } } }))
+          },
+          excludedMerchants: {
+            create: draft.excludedMerchants.map(({ merchantId }) => ({
+              merchant: { connect: { id: merchantId } }
+            }))
+          },
+          excludedBranches: {
+            create: excludedBranchIds.map((branchId) => ({ branch: { connect: { id: branchId } } }))
+          }
         },
-        select: rewardRuleSelect
+        select: promotionSelect
       });
 
       const publishedDraft = await transaction.promotionDraft.update({
         where: { id },
         data: {
           status: 'published',
-          rewardRuleId: rewardRule.id,
           reviewedAt: new Date(),
           rejectionReason: null
         },
@@ -588,7 +877,7 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
 
       return {
         draft: toPromotionDraftRecord(publishedDraft),
-        rewardRule: toRewardRuleRecord(rewardRule)
+        promotion: toPromotionRecord(promotion)
       };
     });
   } catch (error) {

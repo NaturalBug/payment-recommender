@@ -7,6 +7,22 @@ export type MerchantRecord = {
   notes?: string | null;
 };
 
+export type MerchantBranchRecord = {
+  id: number;
+  merchantId: number;
+  name: string;
+  location?: string | null;
+  outletId?: number | null;
+};
+
+export type MerchantOutletRecord = MerchantBranchRecord;
+
+export type OutletRecord = {
+  id: number;
+  name: string;
+  location?: string | null;
+};
+
 export type PaymentMethodRecord = {
   id: number;
   name: string;
@@ -29,11 +45,16 @@ export type RewardRuleRecord = {
   merchantId: number;
   paymentMethodId: number;
   paymentMethodName: string;
-  cashbackRate: number;
+  benefitType: 'cashback' | 'fixed_discount';
+  cashbackRate?: number | null;
+  fixedDiscountAmount?: number | null;
   amountThreshold: number;
   validityStart: Date;
   validityEnd: Date;
   promotionNote?: string | null;
+  sourceUrl?: string | null;
+  outletId?: number | null;
+  outletName?: string | null;
 };
 
 export type ImportSource = 'line-pay' | 'jko-pay' | 'ipass-money';
@@ -61,19 +82,32 @@ export type ImportedPromotionDraft = {
   sourceContent: string;
   fetchedAt: Date;
   parsedCashbackRate?: number | null;
+  parsedBenefitType?: 'cashback' | 'fixed_discount' | null;
+  parsedFixedDiscountAmount?: number | null;
   parsedAmountThreshold?: number | null;
   parsedValidityStart?: Date | null;
   parsedValidityEnd?: Date | null;
 };
 
 export type PromotionDraftReviewInput = {
+  originType?: 'merchant' | 'outlet' | null;
+  originMerchantId?: number | null;
+  originOutletId?: number | null;
+  eligibilityType?: 'merchant_wide' | 'selected_branches' | 'outlet' | null;
+  eligibleBranchIds?: number[];
+  excludedMerchantIds?: number[];
+  excludedBranchIds?: number[];
+  paymentMethodIds?: number[];
   merchantId?: number | null;
   paymentMethodId?: number | null;
+  benefitType?: 'cashback' | 'fixed_discount' | null;
   cashbackRate?: number | null;
+  fixedDiscountAmount?: number | null;
   amountThreshold?: number | null;
   validityStart?: Date | null;
   validityEnd?: Date | null;
   promotionNote?: string | null;
+  outletId?: number | null;
 };
 
 export type PromotionDraftRecord = {
@@ -86,27 +120,66 @@ export type PromotionDraftRecord = {
   sourceContent: string;
   fetchedAt: Date;
   parsedCashbackRate?: number | null;
+  parsedBenefitType?: 'cashback' | 'fixed_discount' | null;
+  parsedFixedDiscountAmount?: number | null;
   parsedAmountThreshold?: number | null;
   parsedValidityStart?: Date | null;
   parsedValidityEnd?: Date | null;
   cashbackRateReviewed: boolean;
+  benefitTypeReviewed: boolean;
+  fixedDiscountAmountReviewed: boolean;
   amountThresholdReviewed: boolean;
   validityStartReviewed: boolean;
   validityEndReviewed: boolean;
   status: PromotionDraftStatus;
+  originType?: 'merchant' | 'outlet' | null;
+  originMerchantId?: number | null;
+  originOutletId?: number | null;
+  eligibilityType?: 'merchant_wide' | 'selected_branches' | 'outlet' | null;
+  eligibleBranchIds: number[];
+  excludedMerchantIds: number[];
+  excludedBranchIds: number[];
+  paymentMethodIds: number[];
   merchantId?: number | null;
   paymentMethodId?: number | null;
+  benefitType: 'cashback' | 'fixed_discount';
   cashbackRate?: number | null;
+  fixedDiscountAmount?: number | null;
   amountThreshold?: number | null;
   validityStart?: Date | null;
   validityEnd?: Date | null;
   promotionNote?: string | null;
+  outletId?: number | null;
   rewardRuleId?: number | null;
   reviewedAt?: Date | null;
   rejectionReason?: string | null;
 };
 
+export type PromotionRecord = {
+  id: number;
+  sourceDraftId: number;
+  originType: 'merchant' | 'outlet';
+  originMerchantId: number | null;
+  originOutletId: number | null;
+  eligibilityType: 'merchant_wide' | 'selected_branches' | 'outlet';
+  benefitType: 'cashback' | 'fixed_discount';
+  cashbackRate: number | null;
+  fixedDiscountAmount: number | null;
+  amountThreshold: number;
+  validityStart: Date;
+  validityEnd: Date;
+  promotionNote: string | null;
+  sourceUrl: string;
+  sourceTitle: string;
+  paymentMethodIds: number[];
+  eligibleBranchIds: number[];
+  excludedMerchantIds: number[];
+  excludedBranchIds: number[];
+};
+
 export type PublishedDraftResult = {
   draft: PromotionDraftRecord;
-  rewardRule: RewardRuleRecord;
+  promotion: PromotionRecord;
 };
+
+export type BenefitType = 'cashback' | 'fixed_discount';

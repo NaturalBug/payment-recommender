@@ -11,6 +11,7 @@ import {
   listImportRuns,
   listPromotionDrafts,
   publishPromotionDraft,
+  reopenPromotionDraft,
   rejectPromotionDraft,
   updatePromotionDraft,
   upsertPendingDraft
@@ -27,8 +28,11 @@ describe('promotion import repository', () => {
   });
 
   beforeEach(async () => {
+    await prisma.promotion.deleteMany();
     await prisma.promotionDraft.deleteMany();
     await prisma.rewardRule.deleteMany();
+    await prisma.merchantBranch.deleteMany();
+    await prisma.outlet.deleteMany();
     await prisma.merchantPaymentAcceptance.deleteMany();
     await prisma.importRun.deleteMany();
     await prisma.merchant.deleteMany();
@@ -70,6 +74,10 @@ describe('promotion import repository', () => {
     const reviewInput: PromotionDraftReviewInput = {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
+      originType: 'merchant',
+      originMerchantId: merchant.id,
+      eligibilityType: 'merchant_wide',
+      paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.05,
       amountThreshold: 100,
       validityStart: new Date('2026-09-01T00:00:00.000Z'),
@@ -317,7 +325,7 @@ describe('promotion import repository', () => {
     });
   });
 
-  test('preserves explicit reviewed nulls when a pending draft is re-imported', async () => {
+  test('requires review for parsed fields that change on a pending draft re-import', async () => {
     const { draft, reviewInput } = await createReviewedDraftFixture();
     const run = await createImportRun('line-pay');
     const input: ImportedPromotionDraft = {
@@ -358,10 +366,75 @@ describe('promotion import repository', () => {
       amountThreshold: null,
       validityStart: null,
       validityEnd: null,
-      cashbackRateReviewed: true,
-      amountThresholdReviewed: true,
-      validityStartReviewed: true,
-      validityEndReviewed: true
+      cashbackRateReviewed: false,
+      amountThresholdReviewed: false,
+      validityStartReviewed: false,
+      validityEndReviewed: false
+    });
+  });
+
+  test('requires review again when an imported parsed value changes', async () => {
+    const { draft } = await createDraftFixture({ parsedCashbackRate: 0.03 });
+    await updatePromotionDraft(draft.id, {
+      cashbackRate: 0.05
+    });
+    const nextRun = await createImportRun('line-pay');
+
+    const repeated = await upsertPendingDraft({
+      importRunId: nextRun.id,
+      source: 'line-pay',
+      sourceFingerprint: draft.sourceFingerprint,
+      sourceUrl: draft.sourceUrl,
+      sourceTitle: draft.sourceTitle,
+      sourceContent: '8% cashback',
+      fetchedAt: draft.fetchedAt,
+      parsedCashbackRate: 0.08
+    });
+
+    expect(repeated).toMatchObject({
+      parsedCashbackRate: 0.08,
+      cashbackRate: 0.05,
+      cashbackRateReviewed: false
+    });
+  });
+
+  test('clears scope relations that no longer apply after an origin change', async () => {
+    const originMerchant = await createMerchant('Scope Merchant');
+    const excludedMerchant = await createMerchant('Excluded Scope Merchant');
+    const outlet = await prisma.outlet.create({
+      data: { name: 'Scope Outlet', normalizedName: 'scopeoutlet' }
+    });
+    const excludedBranch = await prisma.merchantBranch.create({
+      data: {
+        merchantId: excludedMerchant.id,
+        name: 'Excluded Outlet branch',
+        normalizedName: 'excludedoutletbranch',
+        outletId: outlet.id
+      }
+    });
+    const { draft } = await createDraftFixture();
+    await updatePromotionDraft(draft.id, {
+      originType: 'outlet',
+      originOutletId: outlet.id,
+      eligibilityType: 'outlet',
+      excludedMerchantIds: [excludedMerchant.id],
+      excludedBranchIds: [excludedBranch.id]
+    });
+
+    const updated = await updatePromotionDraft(draft.id, {
+      originType: 'merchant',
+      originMerchantId: originMerchant.id,
+      eligibilityType: 'merchant_wide'
+    });
+
+    expect(updated).toMatchObject({
+      originType: 'merchant',
+      originMerchantId: originMerchant.id,
+      originOutletId: null,
+      eligibilityType: 'merchant_wide',
+      eligibleBranchIds: [],
+      excludedMerchantIds: [],
+      excludedBranchIds: []
     });
   });
 
@@ -381,6 +454,24 @@ describe('promotion import repository', () => {
     await expect(rejectPromotionDraft(999999, 'Missing draft')).resolves.toBeNull();
   });
 
+  test('reopens only rejected drafts and retains rejection context', async () => {
+    const { draft } = await createDraftFixture();
+    await expect(reopenPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+
+    await rejectPromotionDraft(draft.id, 'Rejected by mistake');
+    const reopened = await reopenPromotionDraft(draft.id);
+
+    expect(reopened).toMatchObject({
+      id: draft.id,
+      status: 'pending_review',
+      rejectionReason: 'Rejected by mistake',
+      sourceFingerprint: draft.sourceFingerprint,
+      reviewedAt: null
+    });
+    await expect(reopenPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+    await expect(reopenPromotionDraft(999999)).resolves.toBeNull();
+  });
+
   test('publishes a reviewed draft only when its payment method is accepted', async () => {
     const { draft, merchant, paymentMethod, reviewInput } = await createReviewedDraftFixture();
 
@@ -395,6 +486,7 @@ describe('promotion import repository', () => {
       amountThreshold: 100,
       status: 'pending_review'
     });
+
     expect(typeof updatedDraft?.cashbackRate).toBe('number');
     expect(published).toMatchObject({
       draft: expect.objectContaining({
@@ -403,20 +495,102 @@ describe('promotion import repository', () => {
         merchantId: merchant.id,
         paymentMethodId: paymentMethod.id
       }),
-      rewardRule: expect.objectContaining({
-        merchantId: merchant.id,
-        paymentMethodId: paymentMethod.id,
+      promotion: expect.objectContaining({
+        originType: 'merchant',
+        originMerchantId: merchant.id,
+        eligibilityType: 'merchant_wide',
+        paymentMethodIds: [paymentMethod.id],
         cashbackRate: 0.05,
         amountThreshold: 100
       })
     });
-    expect(published.draft.rewardRuleId).toBe(published.rewardRule.id);
+    expect(published.draft.rewardRuleId).toBeNull();
+    await expect(reopenPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
     await expect(
-      prisma.rewardRule.findUnique({
-        where: { id: published.rewardRule.id },
+      prisma.promotion.findUnique({
+        where: { sourceDraftId: draft.id },
         select: { promotionNote: true }
       })
     ).resolves.toMatchObject({ promotionNote: 'Verified manually' });
+  });
+
+  test('publishes explicit Merchant branch and Outlet exclusion scopes without creating RewardRules', async () => {
+    const originMerchant = await createMerchant('Sanyou Cosmetics');
+    const excludedMerchant = await createMerchant('Excluded Merchant');
+    const paymentMethod = await createPaymentMethod({ name: 'iPASS MONEY', type: 'mobile_payment' });
+    await addAcceptance(originMerchant.id, paymentMethod.id);
+    const outlet = await prisma.outlet.create({
+      data: { name: 'LaLaport Nangang', normalizedName: 'lalaportnangang', location: 'Nangang' }
+    });
+    const branch = await prisma.merchantBranch.create({
+      data: {
+        merchantId: originMerchant.id,
+        name: 'Nangang branch',
+        normalizedName: 'nangangbranch',
+        outletId: outlet.id
+      }
+    });
+    const merchantDraft = await createDraftFixture({ sourceFingerprint: 'test:merchant-scope' });
+    await updatePromotionDraft(merchantDraft.draft.id, {
+      merchantId: originMerchant.id,
+      paymentMethodId: paymentMethod.id,
+      originType: 'merchant',
+      originMerchantId: originMerchant.id,
+      eligibilityType: 'selected_branches',
+      eligibleBranchIds: [branch.id],
+      excludedMerchantIds: [excludedMerchant.id],
+      excludedBranchIds: [],
+      paymentMethodIds: [paymentMethod.id],
+      cashbackRate: 0.05,
+      amountThreshold: 100,
+      validityStart: new Date('2026-09-01T00:00:00.000Z'),
+      validityEnd: new Date('2026-09-30T23:59:59.000Z')
+    });
+    const outletDraft = await createDraftFixture({ sourceFingerprint: 'test:outlet-scope' });
+    await updatePromotionDraft(outletDraft.draft.id, {
+      originType: 'outlet',
+      originOutletId: outlet.id,
+      eligibilityType: 'outlet',
+      eligibleBranchIds: [],
+      excludedMerchantIds: [excludedMerchant.id],
+      excludedBranchIds: [],
+      paymentMethodIds: [paymentMethod.id],
+      cashbackRate: 0.03,
+      amountThreshold: 0,
+      validityStart: new Date('2026-09-01T00:00:00.000Z'),
+      validityEnd: new Date('2026-09-30T23:59:59.000Z')
+    });
+
+    await publishPromotionDraft(merchantDraft.draft.id);
+    await publishPromotionDraft(outletDraft.draft.id);
+
+    const promotions = await prisma.promotion.findMany({
+      orderBy: { sourceDraftId: 'asc' },
+      include: {
+        paymentMethods: true,
+        eligibleBranches: true,
+        excludedMerchants: true,
+        excludedBranches: true
+      }
+    });
+    expect(promotions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        originType: 'merchant',
+        originMerchantId: originMerchant.id,
+        eligibilityType: 'selected_branches',
+        eligibleBranches: [expect.objectContaining({ branchId: branch.id })],
+        excludedMerchants: [expect.objectContaining({ merchantId: excludedMerchant.id })],
+        paymentMethods: [expect.objectContaining({ paymentMethodId: paymentMethod.id })]
+      }),
+      expect.objectContaining({
+        originType: 'outlet',
+        originOutletId: outlet.id,
+        eligibilityType: 'outlet',
+        excludedMerchants: [expect.objectContaining({ merchantId: excludedMerchant.id })],
+        paymentMethods: [expect.objectContaining({ paymentMethodId: paymentMethod.id })]
+      })
+    ]));
+    await expect(prisma.rewardRule.count()).resolves.toBe(0);
   });
 
   test('maps a publish-time foreign-key race to a catalog conflict', async () => {
@@ -434,7 +608,7 @@ describe('promotion import repository', () => {
       merchant: prisma.merchant,
       paymentMethod: prisma.paymentMethod,
       merchantPaymentAcceptance: prisma.merchantPaymentAcceptance,
-      rewardRule: {
+      promotion: {
         create: jest.fn().mockRejectedValue(foreignKeyError)
       }
     } as unknown as Prisma.TransactionClient)) as never);
@@ -522,6 +696,10 @@ describe('promotion import repository', () => {
     await updatePromotionDraft(draft.id, {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
+      originType: 'merchant',
+      originMerchantId: merchant.id,
+      eligibilityType: 'merchant_wide',
+      paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.04,
       amountThreshold: 0,
       validityStart: new Date('2026-09-01T00:00:00.000Z'),
@@ -581,7 +759,7 @@ describe('promotion import repository', () => {
     await updatePromotionDraft(draft.id, reviewInput);
 
     await prisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF');
-    await prisma.$executeRawUnsafe(`UPDATE "PromotionDraft" SET "merchantId" = 999999 WHERE "id" = ${draft.id}`);
+    await prisma.$executeRawUnsafe(`UPDATE "PromotionDraft" SET "originMerchantId" = 999999 WHERE "id" = ${draft.id}`);
     await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
 
     await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
@@ -593,7 +771,7 @@ describe('promotion import repository', () => {
     ).resolves.toMatchObject({ status: 'pending_review', rewardRuleId: null });
   });
 
-  test('rejects publishing a draft when the selected payment method is not accepted and leaves it pending', async () => {
+  test('allows publication without acceptance and defers eligibility to recommendations', async () => {
     const merchant = await createMerchant('Missing Acceptance Mart');
     const paymentMethod = await createPaymentMethod({ name: 'Missing Acceptance Pay', type: 'mobile_payment' });
     const { draft } = await createDraftFixture();
@@ -601,19 +779,26 @@ describe('promotion import repository', () => {
     await updatePromotionDraft(draft.id, {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
+      originType: 'merchant',
+      originMerchantId: merchant.id,
+      eligibilityType: 'merchant_wide',
+      paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.02,
       amountThreshold: 10,
       validityStart: new Date('2026-09-01T00:00:00.000Z'),
       validityEnd: new Date('2026-09-30T00:00:00.000Z')
     });
 
-    await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+    await expect(publishPromotionDraft(draft.id)).resolves.toMatchObject({
+      draft: { status: 'published' },
+      promotion: { originMerchantId: merchant.id, paymentMethodIds: [paymentMethod.id] }
+    });
     await expect(
       prisma.promotionDraft.findUnique({
         where: { id: draft.id },
         select: { status: true, rewardRuleId: true }
       })
-    ).resolves.toMatchObject({ status: 'pending_review', rewardRuleId: null });
+    ).resolves.toMatchObject({ status: 'published', rewardRuleId: null });
   });
 
   test('rejects publishing a draft that is no longer pending review', async () => {
