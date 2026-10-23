@@ -123,8 +123,10 @@ not imply that every Merchant accepts every payment method.
 
 Existing `RewardRule` rows remain valid and are still included in
 recommendations. Publishing a new imported draft creates a Promotion rather
-than a standalone Merchant-only RewardRule. There must be no duplicate
-recommendation when a Promotion is also represented through a legacy rule.
+than a standalone Merchant-only RewardRule. A source draft may produce exactly
+one published record: existing drafts already linked to a legacy RewardRule
+remain legacy records, while newly published drafts link to one Promotion and
+do not also create a RewardRule.
 
 ## Import and Review Flow
 
@@ -181,7 +183,9 @@ Eligibility rules:
 - Branch-limited Merchant Promotions are considered only when the selected
   `branch_id` is in the eligible branch list.
 - Outlet Promotions are considered only when the selected `outlet_id` matches
-  the Promotion's Outlet, either directly or through the selected branch.
+  the Promotion's Outlet, either directly or through the selected branch's
+  saved Outlet association. This association is catalog data, not inferred
+  from the branch name or user's location.
 - Excluded Merchants and branches are filtered before payment method
   acceptance, amount, date, and savings ranking.
 - When branch or Outlet context is insufficient to prove eligibility, omit the
@@ -237,10 +241,10 @@ containing existing merchants, rules, and pending/rejected drafts.
 
 ## Error Handling and Safety
 
-- Unknown IDs, mismatched Merchant/branch/Outlet relationships, invalid scope
+- Malformed IDs, mismatched Merchant/branch/Outlet relationships, invalid scope
   combinations, and unsupported benefit values return explicit `400` errors.
-- Missing drafts/catalog items return `404`; invalid state transitions return
-  `409`.
+- Well-formed IDs for missing drafts/catalog items return `404`; invalid state
+  transitions return `409`.
 - Outlet exclusions are structured and enforced in recommendation logic.
   Display notes are explanatory only.
 - Source URLs must remain HTTPS and rendered source text and names must be HTML
