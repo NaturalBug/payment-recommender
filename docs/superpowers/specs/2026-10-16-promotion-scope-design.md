@@ -28,6 +28,9 @@ The system must distinguish:
 The implementation must preserve existing cashback and fixed-discount
 recommendations, imported draft history, and catalog data. An administrator
 must be able to recover a draft rejected by mistake without re-importing it.
+The model must also allow multiple physical Outlets to share a brand or
+operator, such as the several LaLaport locations in Taiwan, without conflating
+their promotion scope.
 
 ## Examples and Required Behavior
 
@@ -67,18 +70,27 @@ selected. Existing reward rules continue to be returned as before.
 
 ### Outlet and MerchantBranch
 
-Add `Outlet` as the shopping venue catalog. It has an identity, normalized
-unique name, and optional address/location.
+Add `Outlet` as the shopping venue catalog. Each physical venue has its own
+stable identity, normalized unique name, and optional free-form address/location.
+For example, Nangang LaLaport and Taichung LaLaport are separate Outlet
+records, even if they share a brand.
 
 Rename the current `MerchantOutlet` concept to `MerchantBranch`. A branch
 belongs to exactly one Merchant and can optionally reference one Outlet. Its
 name is unique within that Merchant after normalization. An Outlet can contain
 branches from many Merchants.
 
-Existing `MerchantOutlet` rows represent branches, not venues. Migrate them to
-`MerchantBranch` while preserving IDs and all branch names/locations. Existing
-`RewardRule.outletId` and `PromotionDraft.outletId` values must be migrated to
-branch references so current branch-limited records retain their meaning.
+Existing `MerchantOutlet` rows represent branches, not venues. Preserve their
+physical SQLite table and foreign-key columns with Prisma `@@map`/`@map`
+annotations while exposing the corrected `MerchantBranch`/`branchId` names in
+application code. This avoids copying or renumbering existing branch records.
+Existing `RewardRule.outletId` and `PromotionDraft.outletId` values continue to
+refer to those same branch records.
+
+Branch and Outlet records retain optional location/address text so a future UI
+can distinguish similarly named branches. This phase does not add structured
+address validation, geocoding, distance search, location permissions, or
+automatic branch selection.
 
 ### Promotion
 
@@ -177,13 +189,14 @@ Eligibility rules:
 - Existing RewardRules continue to follow their current behavior, with the
   current merchant-specific `outletId` interpreted as a Merchant branch ID.
 
-The public UI retains Merchant selection and adds branch and venue context.
-Selecting a branch displays its associated venue and makes branch-specific and
-venue-specific eligibility unambiguous. A user may select an Outlet directly
-when the exact Merchant branch is unknown; venue promotions can then be
-evaluated using the selected Outlet and Merchant exclusion list. Results show
-the origin, eligibility scope, benefit estimate, terms note, and official
-source link.
+The public UI retains Merchant selection and adds explicit branch and venue
+context. Selecting a branch displays its associated venue and makes
+branch-specific and venue-specific eligibility unambiguous. A user may select
+an Outlet directly when the exact Merchant branch is unknown; venue promotions
+can then be evaluated using the selected Outlet and Merchant exclusion list.
+Results show the origin, eligibility scope, benefit estimate, terms note, and
+official source link. This phase uses explicit user selection only; it does
+not infer a user's location or automatically select a likely branch.
 
 Public catalog APIs expose Outlets and Merchant branches. Admin APIs provide
 create/list/update operations for both catalogs. Deletion is allowed only when
@@ -191,19 +204,32 @@ the catalog record is not referenced by a branch, draft, or Promotion;
 otherwise it returns `409`. Draft review APIs accept the origin, eligibility,
 payment method, and exclusion fields.
 
+### Future extensibility (not in this phase)
+
+- A future `OutletGroup` (or equivalent) can associate distinct physical
+  Outlets with a shared brand or operator. Promotions remain attached to a
+  specific Outlet unless a later requirement explicitly introduces
+  group-wide eligibility.
+- Optional branch/Outlet location fields and stable IDs provide a path to
+  richer structured addresses, geocoding, nearby-branch candidate lists, and
+  user-confirmed suggestions. Any suggestions must remain explicit selections
+  before scoped rewards are applied; location-based inference is not part of
+  this phase.
+- Catalog and recommendation contracts use stable Outlet and branch IDs, not
+  names or addresses, so these future capabilities will not require changing
+  promotion identity or eligibility semantics.
+
 ## Migration and Compatibility
 
 The current schema has no distinct Outlet entity. The change is an additive,
-data-preserving migration:
+data-preserving schema update:
 
 1. Create the new `Outlet` model/table.
-2. Migrate old `MerchantOutlet` rows into `MerchantBranch`, preserving their
-   primary keys and merchant ownership.
-3. Repoint existing reward-rule and draft foreign keys from old outlet rows to
-   the migrated branches.
-4. Create Promotion tables and relationships without deleting existing
+2. Expose the existing `MerchantOutlet` table as `MerchantBranch` using Prisma
+   table/column mappings; do not copy, renumber, or discard its rows.
+3. Create Promotion tables and relationships without deleting existing
    RewardRules, ImportRuns, or PromotionDrafts.
-5. Keep legacy RewardRule rows and their API response fields compatible.
+4. Keep legacy RewardRule rows and their API response fields compatible.
 
 Do not require deleting `dev.db` or rejecting/re-importing existing drafts as
 part of the schema update. Validate the migration against a copy of a database
@@ -227,10 +253,11 @@ containing existing merchants, rules, and pending/rejected drafts.
 
 Tests must cover:
 
-- Preserving branch IDs, Merchant relations, rule scope, and draft state during
-  migration.
+- Preserving the existing `MerchantOutlet` table rows, branch IDs, Merchant
+  relations, rule scope, and draft state through mapped schema changes.
 - Creating Outlets and Merchant branches, including a branch associated with
   an Outlet and branches from multiple Merchants in one Outlet.
+- Keeping physical Outlets with the same brand as distinct venue records.
 - Publishing Merchant-wide, selected-branch, and Outlet-origin Promotions.
 - Enforcing structured Merchant and branch exclusions.
 - Requiring the Merchant's payment acceptance mapping.
@@ -250,3 +277,5 @@ Tests must cover:
   trusted structured data. Administrators verify and enter those lists.
 - Authenticated source scraping or automatic publication.
 - Geospatial or proximity-based venue matching.
+- Outlet brand grouping, address normalization/geocoding, location-permission
+  flows, and automatic branch suggestions.
