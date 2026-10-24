@@ -22,6 +22,20 @@
         </label>
 
         <label>
+          Merchant branch (optional)
+          <select id="branch">
+            <option value="">Select a branch for branch-specific offers</option>
+          </select>
+        </label>
+
+        <label>
+          Shopping Outlet/Mall (optional)
+          <select id="outlet">
+            <option value="">Select an Outlet for Outlet-specific offers</option>
+          </select>
+        </label>
+
+        <label>
           Amount (TWD)
           <input id="amount" type="number" min="1" value="500" required />
         </label>
@@ -37,6 +51,7 @@
       <section id="results" aria-live="polite"></section>
     </main>
 
+    <script src="venue-selection.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -3,6 +3,7 @@ import prisma from './lib/prisma';
 import { requireAdminApiKey } from './middleware/adminAuth';
 import adminRouter from './routes/admin';
 import merchantsRouter from './routes/merchants';
+import outletsRouter from './routes/outlets';
 import recommendationsRouter from './routes/recommendations';
 
 const app = express();
@@ -37,6 +38,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.use('/api/merchants', merchantsRouter);
+app.use('/api/outlets', outletsRouter);
 app.use('/api/admin', requireAdminApiKey, adminRouter);
 app.use('/api/recommendations', recommendationsRouter);
 

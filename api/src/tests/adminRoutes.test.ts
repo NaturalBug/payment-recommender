@@ -4,14 +4,33 @@ import prisma from '../lib/prisma';
 import * as merchantRepository from '../repositories/merchantRepository';
 import * as paymentMethodRepository from '../repositories/paymentMethodRepository';
 import * as rewardRuleRepository from '../repositories/rewardRuleRepository';
+import {
+  createImportRun,
+  listPromotionDrafts,
+  rejectPromotionDraft,
+  updatePromotionDraft,
+  upsertPendingDraft
+} from '../repositories/promotionImportRepository';
+import type { ImportSource } from '../repositories/types';
 import { RepositoryConflictError } from '../repositories/errors';
+
+jest.setTimeout(15000);
 
 describe('admin routes', () => {
   beforeEach(async () => {
+    await prisma.promotion.deleteMany();
+    await prisma.promotionDraft.deleteMany();
     await prisma.rewardRule.deleteMany();
+    await prisma.merchantBranch.deleteMany();
+    await prisma.outlet.deleteMany();
     await prisma.merchantPaymentAcceptance.deleteMany();
+    await prisma.importRun.deleteMany();
     await prisma.merchant.deleteMany();
     await prisma.paymentMethod.deleteMany();
+    await prisma.paymentMethodType.deleteMany();
+    await prisma.paymentMethodType.createMany({
+      data: ['credit_card', 'debit_card', 'mobile_payment', 'transit_card', 'contactless'].map((name) => ({ name }))
+    });
 
     await prisma.paymentMethod.createMany({
       data: [
@@ -96,6 +115,7 @@ describe('admin routes', () => {
         merchantId: 999999,
         paymentMethodId: 1,
         paymentMethodName: 'VISA',
+        benefitType: 'cashback',
         cashbackRate: 0.05,
         amountThreshold: 0,
         validityStart: new Date('2026-09-01'),
@@ -146,6 +166,233 @@ describe('admin routes', () => {
         }
       })
     ).resolves.not.toBeNull();
+  });
+
+  test('creates a fixed cash discount reward with a source link', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: merchant.id, paymentMethodId: method.id }
+    });
+
+    const response = await request(app)
+      .post('/api/admin/reward-rules')
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantName: 'FamilyMart',
+        paymentMethodId: method.id,
+        benefitType: 'fixed_discount',
+        fixedDiscountAmount: 30,
+        amountThreshold: 300,
+        validityStart: '2026-10-01',
+        validityEnd: '2026-12-31',
+        promotionNote: '指定商品不適用，名額有限',
+        sourceUrl: 'https://www.i-pass.com.tw/Preferential/Detail/example'
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({
+      benefitType: 'fixed_discount',
+      fixedDiscountAmount: 30,
+      amountThreshold: 300,
+      promotionNote: '指定商品不適用，名額有限',
+      sourceUrl: 'https://www.i-pass.com.tw/Preferential/Detail/example'
+    });
+  });
+
+  test('creates and lists outlets scoped to a merchant', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await prisma.merchant.create({
+      data: { name: '三友藥妝', normalizedName: '三友藥妝', chainName: '三友藥妝' }
+    });
+
+    const created = await request(app)
+      .post(`/api/admin/merchants/${merchant.id}/outlets`)
+      .set(key)
+      .send({ name: '林口三井一店' });
+
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({
+      merchantId: merchant.id,
+      name: '林口三井一店'
+    });
+
+    const listed = await request(app)
+      .get(`/api/admin/merchants/${merchant.id}/outlets`)
+      .set(key);
+    expect(listed.status).toBe(200);
+    expect(listed.body.data).toEqual([
+      expect.objectContaining({ id: created.body.data.id, name: '林口三井一店' })
+    ]);
+
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await request(app).put(`/api/admin/merchants/${merchant.id}/payment-methods/${method.id}`).set(key);
+    const rule = await request(app)
+      .post('/api/admin/reward-rules')
+      .set(key)
+      .send({
+        merchantName: merchant.name,
+        paymentMethodId: method.id,
+        benefitType: 'fixed_discount',
+        fixedDiscountAmount: 30,
+        amountThreshold: 300,
+        validityStart: '2026-10-01',
+        validityEnd: '2026-12-31',
+        promotionNote: '排除藥品，總名額有限',
+        sourceUrl: 'https://www.i-pass.com.tw/Preferential/Detail/GM2DCOA2CEE3T645TiON',
+        outletId: created.body.data.id
+      });
+    expect(rule.status).toBe(201);
+
+    const withoutOutlet = await request(app)
+      .get('/api/recommendations')
+      .query({ merchant_name: merchant.name, amount: 500, date: '2026-10-16' });
+    expect(withoutOutlet.body.data).toEqual([]);
+
+    const exactOutlet = await request(app)
+      .get('/api/recommendations')
+      .query({ merchant_name: merchant.name, amount: 500, date: '2026-10-16', outlet_name: '林口三井一店' });
+    expect(exactOutlet.body.data).toEqual([
+      expect.objectContaining({
+        paymentMethod: 'VISA',
+        benefitType: 'fixed_discount',
+        fixedDiscountAmount: 30,
+        amountThreshold: 300,
+        estimatedSavings: 30,
+        outletName: '林口三井一店',
+        promotionNote: '排除藥品，總名額有限',
+        sourceUrl: 'https://www.i-pass.com.tw/Preferential/Detail/GM2DCOA2CEE3T645TiON'
+      })
+    ]);
+
+    const publicOutlets = await request(app).get(`/api/merchants/${merchant.id}/outlets`);
+    expect(publicOutlets.status).toBe(200);
+    expect(publicOutlets.body.data).toEqual([
+      expect.objectContaining({ id: created.body.data.id, name: '林口三井一店' })
+    ]);
+  });
+
+  test('keeps physical Outlets distinct and lists branches from multiple merchants', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const firstMerchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const secondMerchant = await prisma.merchant.findUniqueOrThrow({ where: { name: '7-ELEVEN' } });
+
+    const firstOutlet = await request(app)
+      .post('/api/admin/outlets')
+      .set(key)
+      .send({ name: 'LaLaport Nangang', location: 'Nangang, Taipei' });
+    const secondOutlet = await request(app)
+      .post('/api/admin/outlets')
+      .set(key)
+      .send({ name: 'LaLaport Taichung', location: 'Taichung' });
+
+    expect(firstOutlet.status).toBe(201);
+    expect(secondOutlet.status).toBe(201);
+    expect(firstOutlet.body.data.id).not.toBe(secondOutlet.body.data.id);
+
+    const adminOutlets = await request(app).get('/api/admin/outlets').set(key);
+    expect(adminOutlets.status).toBe(200);
+    expect(adminOutlets.body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: firstOutlet.body.data.id }),
+      expect.objectContaining({ id: secondOutlet.body.data.id })
+    ]));
+
+    const firstBranch = await request(app)
+      .post(`/api/admin/merchants/${firstMerchant.id}/branches`)
+      .set(key)
+      .send({ name: 'Nangang branch', location: '1F', outletId: firstOutlet.body.data.id });
+    const secondBranch = await request(app)
+      .post(`/api/admin/merchants/${secondMerchant.id}/branches`)
+      .set(key)
+      .send({ name: 'Nangang store', location: '2F', outletId: firstOutlet.body.data.id });
+
+    expect(firstBranch.status).toBe(201);
+    expect(secondBranch.status).toBe(201);
+
+    const adminBranches = await request(app)
+      .get(`/api/admin/merchants/${firstMerchant.id}/branches`)
+      .set(key);
+    expect(adminBranches.status).toBe(200);
+    expect(adminBranches.body.data).toEqual([
+      expect.objectContaining({ id: firstBranch.body.data.id, outletId: firstOutlet.body.data.id })
+    ]);
+
+    const venueBranches = await request(app).get(`/api/outlets/${firstOutlet.body.data.id}/branches`);
+    expect(venueBranches.status).toBe(200);
+    expect(venueBranches.body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ merchantId: firstMerchant.id, outletId: firstOutlet.body.data.id }),
+      expect.objectContaining({ merchantId: secondMerchant.id, outletId: firstOutlet.body.data.id })
+    ]));
+
+    const publicOutlets = await request(app).get('/api/outlets');
+    expect(publicOutlets.body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: firstOutlet.body.data.id, location: 'Nangang, Taipei' }),
+      expect.objectContaining({ id: secondOutlet.body.data.id, location: 'Taichung' })
+    ]));
+
+    const merchantBranches = await request(app).get(`/api/merchants/${firstMerchant.id}/branches`);
+    expect(merchantBranches.status).toBe(200);
+    expect(merchantBranches.body.data).toEqual([
+      expect.objectContaining({ id: firstBranch.body.data.id, outletId: firstOutlet.body.data.id })
+    ]);
+  });
+
+  test('persists structured draft origin, eligibility, and exclusion selections', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const excludedMerchant = await prisma.merchant.findUniqueOrThrow({ where: { name: '7-ELEVEN' } });
+    const branch = await prisma.merchantBranch.create({
+      data: { merchantId: merchant.id, name: 'Selected branch', normalizedName: 'selectedbranch' }
+    });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+    const response = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set(key)
+      .send({
+        originType: 'merchant',
+        originMerchantIds: [merchant.id],
+        eligibilityType: 'selected_branches',
+        eligibleBranchIds: [branch.id],
+        excludedMerchantIds: [excludedMerchant.id],
+        excludedBranchIds: [],
+        paymentMethodIds: [method.id]
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      originType: 'merchant',
+      originMerchantIds: [merchant.id],
+      eligibilityType: 'selected_branches',
+      eligibleBranchIds: [branch.id],
+      excludedMerchantIds: [excludedMerchant.id],
+      excludedBranchIds: [],
+      paymentMethodIds: [method.id]
+    });
+  });
+
+  test('reopens rejected drafts without losing their reason or source identity', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const draft = await createPendingDraft();
+    const rejected = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/reject`)
+      .set(key)
+      .send({ reason: 'Rejected by mistake' });
+    expect(rejected.status).toBe(200);
+
+    const reopened = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/reopen`)
+      .set(key);
+
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.data).toMatchObject({
+      id: draft.id,
+      status: 'pending_review',
+      rejectionReason: 'Rejected by mistake',
+      sourceFingerprint: draft.sourceFingerprint,
+      reviewedAt: null
+    });
   });
 
   test('surfaces unexpected reward-rule write errors as server errors', async () => {
@@ -415,5 +662,472 @@ describe('admin routes', () => {
       .resolves.toMatchObject({ status: 404 });
     await expect(request(app).delete('/api/admin/payment-methods/999999').set(key))
       .resolves.toMatchObject({ status: 404 });
+  });
+
+  async function createPendingDraft(source: ImportSource = 'line-pay') {
+    const run = await createImportRun(source);
+    return upsertPendingDraft({
+      importRunId: run.id,
+      source,
+      sourceFingerprint: `${source}:test-promotion`,
+      sourceUrl: 'https://official.example/promotion',
+      sourceTitle: 'Test promotion',
+      sourceContent: 'Spend NT$500 and receive 5% cashback.',
+      fetchedAt: new Date('2026-09-14T00:00:00.000Z')
+    });
+  }
+
+  test('requires admin API key to review promotion drafts', async () => {
+    const response = await request(app).get('/api/admin/promotion-drafts');
+
+    expect(response.status).toBe(401);
+  });
+
+  test('lists promotion drafts filtered by status', async () => {
+    const pending = await createPendingDraft();
+    await rejectPromotionDraft(pending.id, 'Not applicable');
+
+    const response = await request(app)
+      .get('/api/admin/promotion-drafts?status=rejected')
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({
+        id: pending.id,
+        source: 'line-pay',
+        sourceUrl: 'https://official.example/promotion',
+        sourceContent: expect.any(String),
+        status: 'rejected'
+      })
+    ]);
+  });
+
+  test('lists pending drafts with source and parsed fields needed by the review UI', async () => {
+    const draft = await createPendingDraft();
+    await prisma.promotionDraft.update({
+      where: { id: draft.id },
+      data: {
+        parsedCashbackRate: 0.04,
+        parsedAmountThreshold: 300,
+        parsedValidityStart: new Date('2026-09-01T00:00:00.000Z'),
+        parsedValidityEnd: new Date('2026-09-30T23:59:59.999Z')
+      }
+    });
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const response = await request(app).get('/api/admin/promotion-drafts').set(key);
+    const invalidStatus = await request(app)
+      .get('/api/admin/promotion-drafts?status=running')
+      .set(key);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({
+        id: draft.id,
+        source: 'line-pay',
+        sourceUrl: expect.stringMatching(/^https:/),
+        sourceContent: expect.any(String),
+        parsedCashbackRate: 0.04,
+        parsedAmountThreshold: 300,
+        cashbackRateReviewed: false,
+        amountThresholdReviewed: false,
+        validityStartReviewed: false,
+        validityEndReviewed: false,
+        status: 'pending_review'
+      })
+    ]);
+    expect(invalidStatus.status).toBe(400);
+  });
+
+  test('lists import runs for admin review', async () => {
+    const draft = await createPendingDraft();
+
+    const response = await request(app)
+      .get('/api/admin/import-runs')
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({
+        id: draft.importRunId,
+        source: 'line-pay',
+        status: 'running'
+      })
+    ]);
+  });
+
+  test('updates verified promotion fields while a draft is pending', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const response = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: merchant.id,
+        paymentMethodId: paymentMethod.id,
+        cashbackRate: 0.05,
+        amountThreshold: 500,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30',
+        promotionNote: 'Verified official offer'
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      id: draft.id,
+      status: 'pending_review',
+      merchantId: merchant.id,
+      paymentMethodId: paymentMethod.id,
+      cashbackRate: 0.05,
+      amountThreshold: 500,
+      validityStart: '2026-09-01',
+      validityEnd: '2026-09-30'
+    });
+  });
+
+  test('saves partial review fields without publishing an incomplete draft', async () => {
+    const draft = await createPendingDraft();
+    const response = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({ cashbackRate: 0.04 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      id: draft.id,
+      status: 'pending_review',
+      cashbackRate: 0.04,
+      merchantId: null,
+      paymentMethodId: null
+    });
+  });
+
+  test('clears nullable reviewed fields when explicit nulls are sent', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+    await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: merchant.id,
+        paymentMethodId: paymentMethod.id,
+        cashbackRate: 0.05,
+        amountThreshold: 500,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30',
+        promotionNote: 'Verified official offer'
+      });
+
+    const response = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: null,
+        paymentMethodId: null,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null,
+        promotionNote: null
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      id: draft.id,
+      merchantId: null,
+      paymentMethodId: null,
+      cashbackRate: null,
+      amountThreshold: null,
+      validityStart: null,
+      validityEnd: null,
+      promotionNote: null
+    });
+  });
+
+  test('rejects invalid review fields and empty updates', async () => {
+    const draft = await createPendingDraft();
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const empty = await request(app).patch(`/api/admin/promotion-drafts/${draft.id}`).set(key).send({});
+    const invalid = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set(key)
+      .send({ cashbackRate: -0.1, amountThreshold: 1.5, validityStart: 'bad', validityEnd: '2026-01-01' });
+    const nullCashbackRate = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set(key)
+      .send({ cashbackRate: null });
+
+    expect(empty.status).toBe(400);
+    expect(invalid.status).toBe(400);
+    expect(nullCashbackRate.status).toBe(200);
+    expect(nullCashbackRate.body.data).toMatchObject({
+      id: draft.id,
+      cashbackRate: null
+    });
+  });
+
+  test('does not publish stale reviewed values after they are cleared', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+
+    await prisma.promotionDraft.update({
+      where: { id: draft.id },
+      data: {
+        parsedCashbackRate: 0.04,
+        parsedAmountThreshold: 300,
+        parsedValidityStart: new Date('2026-09-01T00:00:00.000Z'),
+        parsedValidityEnd: new Date('2026-09-30T23:59:59.999Z')
+      }
+    });
+
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: merchant.id, paymentMethodId: paymentMethod.id }
+    });
+
+    await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: merchant.id,
+        paymentMethodId: paymentMethod.id,
+        cashbackRate: 0.05,
+        amountThreshold: 500,
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      });
+
+    const cleared = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: null,
+        paymentMethodId: null,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null
+      });
+    const publish = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
+      .set('X-Admin-API-Key', 'test-admin-key');
+    const refreshed = await request(app)
+      .get('/api/admin/promotion-drafts')
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(cleared.status).toBe(200);
+    expect(publish.status).toBe(400);
+    expect(publish.body.message).toContain('missing reviewed');
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data).toEqual([
+      expect.objectContaining({
+        id: draft.id,
+        parsedCashbackRate: 0.04,
+        parsedAmountThreshold: 300,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null,
+        cashbackRateReviewed: true,
+        amountThresholdReviewed: true,
+        validityStartReviewed: true,
+        validityEndReviewed: true
+      })
+    ]);
+    await expect(prisma.rewardRule.count()).resolves.toBe(0);
+    await expect(listPromotionDrafts('pending_review')).resolves.toEqual([
+      expect.objectContaining({
+        id: draft.id,
+        merchantId: null,
+        paymentMethodId: null,
+        cashbackRate: null,
+        amountThreshold: null,
+        validityStart: null,
+        validityEnd: null,
+        cashbackRateReviewed: true,
+        amountThresholdReviewed: true,
+        validityStartReviewed: true,
+        validityEndReviewed: true,
+        rewardRuleId: null,
+        status: 'pending_review'
+      })
+    ]);
+  });
+
+  test('publishes a reviewed promotion draft through the protected API', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: merchant.id, paymentMethodId: paymentMethod.id }
+    });
+    await updatePromotionDraft(draft.id, {
+      merchantId: merchant.id,
+      paymentMethodId: paymentMethod.id,
+      originType: 'merchant',
+      originMerchantIds: [merchant.id],
+      eligibilityType: 'merchant_wide',
+      paymentMethodIds: [paymentMethod.id],
+      cashbackRate: 0.05,
+      amountThreshold: 500,
+      validityStart: new Date('2026-09-01T00:00:00.000Z'),
+      validityEnd: new Date('2026-09-30T23:59:59.999Z'),
+      promotionNote: 'Verified offer'
+    });
+
+    const response = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({
+      status: 'published',
+      rewardRuleId: null,
+      paymentMethodId: paymentMethod.id,
+      validityStart: '2026-09-01',
+      validityEnd: '2026-09-30',
+      promotion: expect.objectContaining({
+        originType: 'merchant',
+        originMerchantIds: [merchant.id],
+        eligibilityType: 'merchant_wide',
+        validityStart: '2026-09-01',
+        validityEnd: '2026-09-30'
+      })
+    });
+    await expect(prisma.promotion.count({ where: { sourceDraftId: draft.id } })).resolves.toBe(1);
+    await expect(prisma.rewardRule.count()).resolves.toBe(0);
+  });
+
+  test('publishes a fixed discount with outlet scope, caveats, and official source URL', async () => {
+    const draft = await createPendingDraft('ipass-money');
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const branch = await prisma.merchantBranch.create({
+      data: { merchantId: merchant.id, name: 'Lin Kou Mall', normalizedName: 'lin kou mall' }
+    });
+    await prisma.merchantPaymentAcceptance.create({
+      data: { merchantId: merchant.id, paymentMethodId: paymentMethod.id }
+    });
+    const review = await request(app)
+      .patch(`/api/admin/promotion-drafts/${draft.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key')
+      .send({
+        merchantId: merchant.id,
+        paymentMethodId: paymentMethod.id,
+        originType: 'merchant',
+        originMerchantIds: [merchant.id],
+        eligibilityType: 'selected_branches',
+        eligibleBranchIds: [branch.id],
+        excludedMerchantIds: [],
+        excludedBranchIds: [],
+        paymentMethodIds: [paymentMethod.id],
+        benefitType: 'fixed_discount',
+        fixedDiscountAmount: 30,
+        amountThreshold: 300,
+        validityStart: '2026-10-01',
+        validityEnd: '2026-12-31',
+        promotionNote: '不含藥品，總折抵名額有限',
+        outletId: branch.id
+      });
+    expect(review.status).toBe(200);
+    expect(review.body.data).toMatchObject({
+      benefitType: 'fixed_discount',
+      fixedDiscountAmount: 30,
+      outletId: branch.id,
+      eligibleBranchIds: [branch.id]
+    });
+
+    const response = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(response.status).toBe(201);
+    expect(response.body.data.promotion).toMatchObject({
+      benefitType: 'fixed_discount',
+      fixedDiscountAmount: 30,
+      cashbackRate: null,
+      originMerchantIds: [merchant.id],
+      eligibleBranchIds: [branch.id],
+      sourceUrl: 'https://official.example/promotion',
+      promotionNote: '不含藥品，總折抵名額有限'
+    });
+
+    await expect(prisma.rewardRule.count()).resolves.toBe(0);
+
+    const list = await request(app)
+      .get('/api/admin/promotions')
+      .set('X-Admin-API-Key', 'test-admin-key');
+    expect(list.status).toBe(200);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0]).toMatchObject({
+      id: response.body.data.promotion.id,
+      eligibilityType: 'selected_branches',
+      fixedDiscountAmount: 30,
+      eligibleBranchIds: [branch.id],
+      validityStart: '2026-10-01',
+      validityEnd: '2026-12-31'
+    });
+
+    const unauthorized = await request(app).get('/api/admin/promotions');
+    expect(unauthorized.status).toBe(401);
+  });
+
+  test('publishes without requiring acceptance mapping until recommendation time', async () => {
+    const draft = await createPendingDraft();
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const paymentMethod = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    await updatePromotionDraft(draft.id, {
+      merchantId: merchant.id,
+      paymentMethodId: paymentMethod.id,
+      originType: 'merchant',
+      originMerchantIds: [merchant.id],
+      eligibilityType: 'merchant_wide',
+      paymentMethodIds: [paymentMethod.id],
+      cashbackRate: 0.05,
+      amountThreshold: 500,
+      validityStart: new Date('2026-09-01'),
+      validityEnd: new Date('2026-09-30')
+    });
+
+    const response = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/publish`)
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(response.status).toBe(201);
+    expect(response.body.data.promotion.originMerchantIds).toEqual([merchant.id]);
+    await expect(listPromotionDrafts('pending_review')).resolves.toHaveLength(0);
+  });
+
+  test('rejects a promotion draft with a reason and conflicts on repeated finalization', async () => {
+    const draft = await createPendingDraft();
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const missingReason = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/reject`)
+      .set(key)
+      .send({ reason: '  ' });
+    const rejected = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/reject`)
+      .set(key)
+      .send({ reason: 'Not an eligible promotion' });
+    const repeat = await request(app)
+      .post(`/api/admin/promotion-drafts/${draft.id}/reject`)
+      .set(key)
+      .send({ reason: 'Repeated' });
+
+    expect(missingReason.status).toBe(400);
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.data).toMatchObject({ status: 'rejected', rejectionReason: 'Not an eligible promotion' });
+    expect(repeat.status).toBe(409);
+  });
+
+  test('returns not found for an unknown promotion draft', async () => {
+    const response = await request(app)
+      .post('/api/admin/promotion-drafts/999999/publish')
+      .set('X-Admin-API-Key', 'test-admin-key');
+
+    expect(response.status).toBe(404);
   });
 });

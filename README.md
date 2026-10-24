@@ -46,13 +46,12 @@ npx prisma db push
 npm run db:seed
 ```
 
-Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep the database file in `api/prisma/` and do not commit it; it is already ignored by git.
-The catalog schema is intentionally not backward-compatible while the project
-is in its early stages. After pulling a schema update, reset and reinitialize
-the local database:
+Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep
+the database file in `api/prisma/` and do not commit it; it is already ignored
+by git. Back up local SQLite data before applying schema updates, then update
+the schema in place:
 
 ```bash
-rm -f prisma/dev.db
 npx prisma db push
 npm run db:seed
 ```
@@ -64,12 +63,83 @@ you must enter it again after reloading the page. Click **Connect** after
 entering the key; the catalog and management forms remain disabled until the
 key is verified successfully.
 
-## Test isolation
+## Promotion import beta
 
-Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. For a completely clean setup, remove stale database files before reinitializing:
+The first manual-import beta supports exactly these official public sources:
+
+- `line-pay`
+- `jko-pay`
+- `ipass-money`
+
+The JKO Pay importer reads the localized official campaign listing directly and
+keeps only official campaign or event links. The iPASS MONEY importer reads
+promotion cards from its public listing and accepts only official promotion
+detail links. Both sources still produce drafts for manual review.
+
+Initialize the local database with the existing setup commands before importing:
 
 ```bash
-rm -f api/prisma/dev.db api/prisma/test.db
+cd api
+cp .env.example .env
+npx prisma generate
+npx prisma db push
+npm run db:seed
+```
+
+Run one source at a time against that same local database:
+
+```bash
+cd api
+npm run import:promotions -- --source line-pay
+npm run import:promotions -- --source jko-pay
+npm run import:promotions -- --source ipass-money
+```
+
+Each successful run creates an `ImportRun` record plus reviewable
+`PromotionDraft` entries. Drafts do not affect `/api/recommendations` and do
+not publish automatically. An approved draft creates a canonical `Promotion`
+record, which can affect public recommendations.
+
+Reward rules support both percentage cashback and fixed cash discounts. Admins
+can manage shopping Outlets/Malls (physical venues) separately from Merchant
+branches. A promotion may originate from one or more Merchants or one or more
+shopping Outlets/Malls (`originMerchantIds` / `originOutletIds`, one type per
+promotion); Merchant promotions may apply Merchant-wide or to selected
+branches, while Outlet/Mall promotions apply at any listed Outlet and can
+exclude Merchants or branches. Recommendations use selected catalog IDs, not names or inferred
+locations. Review notes for exclusions or limited quantities are shown with
+the result, alongside a link to the official promotion terms.
+
+Import failures exit non-zero and are recorded on the related import run. Only
+allowed official public pages are supported in this phase. Source availability,
+page structure, and published terms can change over time, so a source that
+worked previously may later fail or become unsupported if it requires access
+that is no longer publicly permitted.
+
+### Reviewing and publishing imported promotions
+
+1. Start the API and web UI, then open `web/admin.html` in the browser flow
+   described above and connect with `ADMIN_API_KEY`.
+2. Use the **Imported promotions** section to inspect recent import runs and
+   pending drafts, including the official source URL, captured source text, and
+   parsed values.
+3. Add any missing Merchant branches, shopping Outlets/Malls, or payment methods.
+   Configure accepted payment methods for Merchants as needed; acceptance is
+   checked when recommendations are generated.
+4. Save the reviewed origin, eligibility, payment methods, included branches,
+   exclusions, benefit, threshold, dates, and optional user-facing note.
+5. Publish the draft to create a canonical `Promotion`, or reject it with a
+   reason to keep it out of recommendations. Rejected drafts can be reopened
+   for review; importing the same activity does not reopen them automatically.
+6. On the public page, choose the Merchant branch and/or shopping Outlet/Mall
+   explicitly to include matching location-specific promotions.
+
+## Test isolation
+
+Jest runs against a dedicated SQLite test database instead of the development database. The test bootstrap sets `DATABASE_URL` to `file:./prisma/test.db`, so local dev data and test runs stay isolated. To reset only the isolated test database if it becomes stale:
+
+```bash
+rm -f api/prisma/test.db
 ```
 
 ## Future PostgreSQL migration notes
@@ -85,6 +155,7 @@ The backend now includes a lightweight admin catalog for merchants and reward ru
 - `GET /api/admin/reward-rules`
 - `POST /api/admin/reward-rules` with rule payload
 - `DELETE /api/admin/reward-rules/:id`
+- `GET /api/admin/promotions` (read-only list of published promotions)
 
 All Admin API endpoints require `X-Admin-API-Key`. Requests without a key
 return `401`; requests with an incorrect key return `403`.
@@ -97,7 +168,8 @@ endpoints to manage merchants, payment methods, and merchant acceptance
 mappings:
 
 - `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/merchants`
-- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/payment-methods`
+- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/payment-methods` (`type` must exist in the type catalog)
+- `GET`, `POST` `/api/admin/payment-method-types` and `DELETE` `/api/admin/payment-method-types/:id` (names are lowercase `a-z0-9_`; types in use cannot be deleted)
 - `GET`, `PUT`, and `DELETE` `/api/admin/merchants/:merchantId/payment-methods/:paymentMethodId`
 
 Configure a merchant in this order: create the merchant, create or choose a

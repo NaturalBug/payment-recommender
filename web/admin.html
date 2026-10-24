@@ -14,7 +14,7 @@
       </nav>
 
       <p class="eyebrow">Admin catalog</p>
-      <h1>Manage merchants, payment methods, and reward rules</h1>
+      <h1>Manage merchants, Outlets, branches, and promotions</h1>
       <div class="section-heading">
         <p class="muted">Maintain the catalog used by the recommendation page.</p>
         <button id="refresh-catalog" class="secondary-button" type="button">Refresh</button>
@@ -30,7 +30,41 @@
       <div id="catalog-status" class="status" role="status" aria-live="polite"></div>
 
       <fieldset id="catalog-controls" disabled>
-        <div class="catalog-grid">
+        <div class="tab-bar" role="tablist" aria-label="Admin sections">
+          <button type="button" class="tab-button" role="tab" data-tab="review">Review</button>
+          <button type="button" class="tab-button" role="tab" data-tab="catalog">Catalog</button>
+          <button type="button" class="tab-button" role="tab" data-tab="rules">Rules</button>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="review" role="tabpanel">
+        <section class="promotion-review-section">
+          <div class="section-heading promotion-review-heading">
+            <div>
+              <h2>Imported promotions</h2>
+              <p class="muted">Review each draft's origin, eligibility, payment methods, and structured exclusions before publishing.</p>
+            </div>
+            <label class="promotion-filter">
+              Status
+              <select id="promotion-draft-status" name="promotionDraftStatus">
+                <option value="pending_review" selected>Pending review</option>
+                <option value="published">Published</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+          </div>
+          <div class="promotion-import-runs">
+            <div class="promotion-import-runs-heading">
+              <h3>Recent import runs</h3>
+              <p class="muted">Check the latest run status before reviewing or re-running source imports.</p>
+            </div>
+            <div id="import-runs" class="promotion-import-runs-list"></div>
+          </div>
+          <div id="promotion-drafts" class="promotion-draft-list"></div>
+        </section>
+        </div>
+
+        <div class="tab-panel" data-tab-panel="catalog" role="tabpanel" hidden>
+          <div class="catalog-grid catalog-forms">
           <div class="forms-column">
             <form id="merchant-form" class="catalog-form merchant-form">
               <h2>Add merchant</h2>
@@ -49,12 +83,100 @@
               </label>
               <label>
                 Payment method type
-                <input id="payment-method-type" name="type" type="text" required maxlength="60" />
+                <select id="payment-method-type" name="type" required></select>
               </label>
               <button type="submit">Add payment method</button>
             </form>
           </div>
 
+          </div>
+
+        <section class="management-section outlet-section">
+          <h2>Shopping Outlets/Malls</h2>
+          <form id="physical-outlet-form" class="form-row">
+            <label>
+              Outlet/Mall name
+              <input id="physical-outlet-name" name="name" type="text" maxlength="120" required />
+            </label>
+            <label>
+              Location (optional)
+              <input id="physical-outlet-location" name="location" type="text" maxlength="200" />
+            </label>
+            <button type="submit">Add shopping Outlet/Mall</button>
+          </form>
+          <div id="outlets" class="table-wrapper"></div>
+        </section>
+
+        <section class="management-section">
+          <h2>Merchant branches</h2>
+          <form id="branch-form" class="form-row">
+            <label>
+              Merchant
+              <select id="branch-merchant" name="merchantId" required></select>
+            </label>
+            <label>
+              Location (optional)
+              <input id="branch-location" name="location" type="text" maxlength="200" />
+            </label>
+            <label>
+              Branch name
+              <input id="branch-name" name="name" type="text" maxlength="120" required />
+            </label>
+            <label>
+              Shopping Outlet/Mall (optional)
+              <select id="branch-outlet" name="outletId"></select>
+            </label>
+            <button type="submit">Add branch</button>
+          </form>
+          <div id="branches" class="table-wrapper"></div>
+        </section>
+
+        <section class="management-section">
+          <h2>Merchants</h2>
+          <div id="merchants" class="table-wrapper"></div>
+        </section>
+
+        <section class="management-section">
+          <h2>Payment method types</h2>
+          <form id="payment-method-type-form" class="inline-form">
+            <label>
+              New type
+              <input id="payment-method-type-name" name="name" type="text" required maxlength="60" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="transit_card" />
+            </label>
+            <button type="submit">Add type</button>
+          </form>
+          <div id="payment-method-types" class="table-wrapper"></div>
+          <div id="payment-method-type-usage" class="type-usage" hidden></div>
+        </section>
+
+        <section class="management-section">
+          <h2>Payment methods</h2>
+          <div id="payment-methods" class="table-wrapper"></div>
+        </section>
+
+        </div>
+
+        <div class="tab-panel" data-tab-panel="rules" role="tabpanel" hidden>
+        <section class="acceptance-section">
+          <h2>Accepted payment methods</h2>
+          <label>
+            Merchant
+            <select id="acceptance-merchant" name="merchantId"></select>
+          </label>
+          <div id="accepted-payment-methods" class="checkbox-grid"></div>
+        </section>
+
+        <section class="rules-section">
+          <h2>Reward rules</h2>
+          <div id="reward-rules" class="table-wrapper"></div>
+        </section>
+
+        <section class="rules-section">
+          <h2>Published promotions</h2>
+          <div id="published-promotions" class="table-wrapper"></div>
+        </section>
+
+          <div class="catalog-grid catalog-forms rule-form-grid">
           <form id="reward-rule-form" class="catalog-form">
             <h2>Add reward rule</h2>
             <label>
@@ -65,16 +187,33 @@
               Payment method
               <select id="payment-method" name="paymentMethodId" required></select>
             </label>
+            <label>
+              Benefit type
+              <select id="benefit-type" name="benefitType">
+                <option value="cashback">Percentage cashback</option>
+                <option value="fixed_discount">Fixed cash discount</option>
+              </select>
+            </label>
             <div class="form-row numeric-fields">
               <label>
                 Cashback rate
                 <input id="cashback-rate" name="cashbackRate" type="number" min="0" step="0.001" value="0.01" required />
               </label>
               <label>
+                Fixed discount (TWD)
+                <input id="fixed-discount-amount" name="fixedDiscountAmount" type="number" min="1" step="1" />
+              </label>
+              <label>
                 Amount threshold
                 <input id="amount-threshold" name="amountThreshold" type="number" min="0" step="1" value="0" required />
               </label>
             </div>
+            <label>
+              Merchant branch restriction
+              <select id="rule-outlet" name="outletId">
+                <option value="">All branches</option>
+              </select>
+            </label>
             <div class="form-row">
               <label>
                 Valid from
@@ -86,36 +225,17 @@
               </label>
             </div>
             <label>
-              Promotion note
-              <textarea id="promotion-note" name="promotionNote" rows="2" maxlength="500"></textarea>
+              User-facing terms, exclusions, or quantity limits
+              <textarea id="promotion-note" name="promotionNote" rows="3" maxlength="500"></textarea>
+            </label>
+            <label>
+              Official promotion URL
+              <input id="rule-source-url" name="sourceUrl" type="url" placeholder="https://..." />
             </label>
             <button type="submit">Add reward rule</button>
           </form>
+          </div>
         </div>
-
-        <section class="acceptance-section">
-          <h2>Accepted payment methods</h2>
-          <label>
-            Merchant
-            <select id="acceptance-merchant" name="merchantId"></select>
-          </label>
-          <div id="accepted-payment-methods" class="checkbox-grid"></div>
-        </section>
-
-        <section class="management-section">
-          <h2>Merchants</h2>
-          <div id="merchants" class="table-wrapper"></div>
-        </section>
-
-        <section class="management-section">
-          <h2>Payment methods</h2>
-          <div id="payment-methods" class="table-wrapper"></div>
-        </section>
-
-        <section class="rules-section">
-          <h2>Reward rules</h2>
-          <div id="reward-rules" class="table-wrapper"></div>
-        </section>
       </fieldset>
     </main>
 
