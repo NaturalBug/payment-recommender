@@ -177,6 +177,24 @@ button {
   justify-content: flex-end;
 }
 
+.inline-form {
+  align-items: end;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.type-usage {
+  border: 1px solid #d8a000;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.type-usage[hidden] {
+  display: none;
+}
+
 fieldset {
   border: 0;
   margin: 0;
@@ -419,4 +437,68 @@ th, td {
   .promotion-filter {
     min-width: 0;
   }
+}
+
+.tab-bar {
+  border-bottom: 1px solid #e6edf4;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.tab-button {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 10px 16px;
+}
+
+.tab-button.active {
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+.catalog-forms {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.catalog-forms .forms-column {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.rule-form-grid {
+  margin-top: 28px;
+}
+
+.management-section > h2,
+.acceptance-section > h2,
+.rules-section > h2 {
+  cursor: pointer;
+  user-select: none;
+}
+
+.management-section > h2::before,
+.acceptance-section > h2::before,
+.rules-section > h2::before {
+  content: '▾ ';
+}
+
+.is-collapsed > h2::before {
+  content: '▸ ';
+}
+
+.is-collapsed > :not(h2) {
+  display: none;
+}
+
+.table-wrapper {
+  max-height: 420px;
+  overflow-y: auto;
 }

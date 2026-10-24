@@ -140,8 +140,8 @@ describe('getRecommendations', () => {
 
   async function createPromotion(input: {
     originType: 'merchant' | 'outlet';
-    originMerchantId?: number;
-    originOutletId?: number;
+    originMerchantIds?: number[];
+    originOutletIds?: number[];
     eligibilityType: 'merchant_wide' | 'selected_branches' | 'outlet';
     paymentMethodId: number;
     eligibleBranchIds?: number[];
@@ -166,8 +166,12 @@ describe('getRecommendations', () => {
       data: {
         sourceDraft: { connect: { id: draft.id } },
         originType: input.originType,
-        originMerchant: input.originMerchantId ? { connect: { id: input.originMerchantId } } : undefined,
-        originOutlet: input.originOutletId ? { connect: { id: input.originOutletId } } : undefined,
+        originMerchants: {
+          create: (input.originMerchantIds ?? []).map((merchantId) => ({ merchant: { connect: { id: merchantId } } }))
+        },
+        originOutlets: {
+          create: (input.originOutletIds ?? []).map((outletId) => ({ outlet: { connect: { id: outletId } } }))
+        },
         eligibilityType: input.eligibilityType,
         benefitType: 'fixed_discount',
         fixedDiscountAmount: 30,
@@ -257,6 +261,31 @@ describe('getRecommendations', () => {
     expect(results.map((result) => result.paymentMethod)).toEqual(['LINE Pay', 'VISA']);
   });
 
+  test('applies one promotion to every Outlet listed as an origin', async () => {
+    const sevenEleven = await prisma.merchant.findUniqueOrThrow({ where: { name: '7-ELEVEN' } });
+    const linePay = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'LINE Pay' } });
+    const [mallA, mallB, mallC] = await Promise.all(['Mall A', 'Mall B', 'Mall C'].map((name) =>
+      prisma.outlet.create({ data: { name, normalizedName: name.toLowerCase().replace(' ', '') } })
+    ));
+    const promotion = await createPromotion({
+      originType: 'outlet',
+      originOutletIds: [mallA.id, mallB.id],
+      eligibilityType: 'outlet',
+      paymentMethodId: linePay.id,
+      sourceUrl: 'https://official.example/multi-mall'
+    });
+    const ids = async (outletId: number) => (await getRecommendations({
+      merchant_name: sevenEleven.name,
+      amount: 500,
+      date: new Date('2026-10-01'),
+      outlet_id: outletId
+    })).map((item) => item.promotionId);
+
+    expect(await ids(mallA.id)).toContain(promotion.id);
+    expect(await ids(mallB.id)).toContain(promotion.id);
+    expect(await ids(mallC.id)).not.toContain(promotion.id);
+  });
+
   test('limits Outlet promotions to one physical venue and applies Merchant exclusions', async () => {
     const familyMart = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
     const sevenEleven = await prisma.merchant.findUniqueOrThrow({ where: { name: '7-ELEVEN' } });
@@ -285,7 +314,7 @@ describe('getRecommendations', () => {
     });
     const promotion = await createPromotion({
       originType: 'outlet',
-      originOutletId: nangang.id,
+      originOutletIds: [nangang.id],
       eligibilityType: 'outlet',
       paymentMethodId: linePay.id,
       excludedMerchantIds: [familyMart.id],
@@ -341,7 +370,7 @@ describe('getRecommendations', () => {
     });
     const promotion = await createPromotion({
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'selected_branches',
       eligibleBranchIds: [branch.id],
       paymentMethodId: linePay.id,
@@ -372,7 +401,7 @@ describe('getRecommendations', () => {
     });
     const promotion = await createPromotion({
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'selected_branches',
       eligibleBranchIds: [branch.id],
       paymentMethodId: linePay.id,

@@ -75,7 +75,7 @@ describe('promotion import repository', () => {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'merchant_wide',
       paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.05,
@@ -415,7 +415,7 @@ describe('promotion import repository', () => {
     const { draft } = await createDraftFixture();
     await updatePromotionDraft(draft.id, {
       originType: 'outlet',
-      originOutletId: outlet.id,
+      originOutletIds: [outlet.id],
       eligibilityType: 'outlet',
       excludedMerchantIds: [excludedMerchant.id],
       excludedBranchIds: [excludedBranch.id]
@@ -423,14 +423,14 @@ describe('promotion import repository', () => {
 
     const updated = await updatePromotionDraft(draft.id, {
       originType: 'merchant',
-      originMerchantId: originMerchant.id,
+      originMerchantIds: [originMerchant.id],
       eligibilityType: 'merchant_wide'
     });
 
     expect(updated).toMatchObject({
       originType: 'merchant',
-      originMerchantId: originMerchant.id,
-      originOutletId: null,
+      originMerchantIds: [originMerchant.id],
+      originOutletIds: [],
       eligibilityType: 'merchant_wide',
       eligibleBranchIds: [],
       excludedMerchantIds: [],
@@ -497,7 +497,7 @@ describe('promotion import repository', () => {
       }),
       promotion: expect.objectContaining({
         originType: 'merchant',
-        originMerchantId: merchant.id,
+        originMerchantIds: [merchant.id],
         eligibilityType: 'merchant_wide',
         paymentMethodIds: [paymentMethod.id],
         cashbackRate: 0.05,
@@ -535,7 +535,7 @@ describe('promotion import repository', () => {
       merchantId: originMerchant.id,
       paymentMethodId: paymentMethod.id,
       originType: 'merchant',
-      originMerchantId: originMerchant.id,
+      originMerchantIds: [originMerchant.id],
       eligibilityType: 'selected_branches',
       eligibleBranchIds: [branch.id],
       excludedMerchantIds: [excludedMerchant.id],
@@ -549,7 +549,7 @@ describe('promotion import repository', () => {
     const outletDraft = await createDraftFixture({ sourceFingerprint: 'test:outlet-scope' });
     await updatePromotionDraft(outletDraft.draft.id, {
       originType: 'outlet',
-      originOutletId: outlet.id,
+      originOutletIds: [outlet.id],
       eligibilityType: 'outlet',
       eligibleBranchIds: [],
       excludedMerchantIds: [excludedMerchant.id],
@@ -567,6 +567,8 @@ describe('promotion import repository', () => {
     const promotions = await prisma.promotion.findMany({
       orderBy: { sourceDraftId: 'asc' },
       include: {
+        originMerchants: true,
+        originOutlets: true,
         paymentMethods: true,
         eligibleBranches: true,
         excludedMerchants: true,
@@ -576,7 +578,7 @@ describe('promotion import repository', () => {
     expect(promotions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         originType: 'merchant',
-        originMerchantId: originMerchant.id,
+        originMerchants: [expect.objectContaining({ merchantId: originMerchant.id })],
         eligibilityType: 'selected_branches',
         eligibleBranches: [expect.objectContaining({ branchId: branch.id })],
         excludedMerchants: [expect.objectContaining({ merchantId: excludedMerchant.id })],
@@ -584,7 +586,7 @@ describe('promotion import repository', () => {
       }),
       expect.objectContaining({
         originType: 'outlet',
-        originOutletId: outlet.id,
+        originOutlets: [expect.objectContaining({ outletId: outlet.id })],
         eligibilityType: 'outlet',
         excludedMerchants: [expect.objectContaining({ merchantId: excludedMerchant.id })],
         paymentMethods: [expect.objectContaining({ paymentMethodId: paymentMethod.id })]
@@ -697,7 +699,7 @@ describe('promotion import repository', () => {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'merchant_wide',
       paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.04,
@@ -754,12 +756,38 @@ describe('promotion import repository', () => {
     ).resolves.toMatchObject({ status: 'pending_review', rewardRuleId: null });
   });
 
+  test('keeps several origin Outlets and prunes excluded branches of a removed Outlet', async () => {
+    const merchant = await createMerchant('Multi Outlet Merchant');
+    const mallA = await prisma.outlet.create({ data: { name: 'Multi Mall A', normalizedName: 'multimalla' } });
+    const mallB = await prisma.outlet.create({ data: { name: 'Multi Mall B', normalizedName: 'multimallb' } });
+    const branchA = await prisma.merchantBranch.create({
+      data: { merchantId: merchant.id, name: 'Branch A', normalizedName: 'brancha', outletId: mallA.id }
+    });
+    const branchB = await prisma.merchantBranch.create({
+      data: { merchantId: merchant.id, name: 'Branch B', normalizedName: 'branchb', outletId: mallB.id }
+    });
+    const { draft } = await createDraftFixture();
+
+    const both = await updatePromotionDraft(draft.id, {
+      originType: 'outlet',
+      originOutletIds: [mallA.id, mallB.id],
+      eligibilityType: 'outlet',
+      excludedBranchIds: [branchA.id, branchB.id]
+    });
+    expect(both).toMatchObject({ originOutletIds: expect.arrayContaining([mallA.id, mallB.id]) });
+    expect(both?.excludedBranchIds).toHaveLength(2);
+
+    const onlyA = await updatePromotionDraft(draft.id, { originOutletIds: [mallA.id] });
+    expect(onlyA?.originOutletIds).toEqual([mallA.id]);
+    expect(onlyA?.excludedBranchIds).toEqual([branchA.id]);
+  });
+
   test('rejects publishing a draft whose selected catalog records are missing and leaves it pending', async () => {
     const { draft, reviewInput } = await createReviewedDraftFixture();
     await updatePromotionDraft(draft.id, reviewInput);
 
     await prisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF');
-    await prisma.$executeRawUnsafe(`UPDATE "PromotionDraft" SET "originMerchantId" = 999999 WHERE "id" = ${draft.id}`);
+    await prisma.$executeRawUnsafe(`UPDATE "PromotionDraftOriginMerchant" SET "merchantId" = 999999 WHERE "draftId" = ${draft.id}`);
     await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
 
     await expect(publishPromotionDraft(draft.id)).rejects.toBeInstanceOf(RepositoryConflictError);
@@ -780,7 +808,7 @@ describe('promotion import repository', () => {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'merchant_wide',
       paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.02,
@@ -791,7 +819,7 @@ describe('promotion import repository', () => {
 
     await expect(publishPromotionDraft(draft.id)).resolves.toMatchObject({
       draft: { status: 'published' },
-      promotion: { originMerchantId: merchant.id, paymentMethodIds: [paymentMethod.id] }
+      promotion: { originMerchantIds: [merchant.id], paymentMethodIds: [paymentMethod.id] }
     });
     await expect(
       prisma.promotionDraft.findUnique({

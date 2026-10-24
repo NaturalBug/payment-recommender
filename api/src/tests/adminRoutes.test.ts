@@ -27,6 +27,10 @@ describe('admin routes', () => {
     await prisma.importRun.deleteMany();
     await prisma.merchant.deleteMany();
     await prisma.paymentMethod.deleteMany();
+    await prisma.paymentMethodType.deleteMany();
+    await prisma.paymentMethodType.createMany({
+      data: ['credit_card', 'debit_card', 'mobile_payment', 'transit_card', 'contactless'].map((name) => ({ name }))
+    });
 
     await prisma.paymentMethod.createMany({
       data: [
@@ -348,7 +352,7 @@ describe('admin routes', () => {
       .set(key)
       .send({
         originType: 'merchant',
-        originMerchantId: merchant.id,
+        originMerchantIds: [merchant.id],
         eligibilityType: 'selected_branches',
         eligibleBranchIds: [branch.id],
         excludedMerchantIds: [excludedMerchant.id],
@@ -359,7 +363,7 @@ describe('admin routes', () => {
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'selected_branches',
       eligibleBranchIds: [branch.id],
       excludedMerchantIds: [excludedMerchant.id],
@@ -964,7 +968,7 @@ describe('admin routes', () => {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'merchant_wide',
       paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.05,
@@ -987,7 +991,7 @@ describe('admin routes', () => {
       validityEnd: '2026-09-30',
       promotion: expect.objectContaining({
         originType: 'merchant',
-        originMerchantId: merchant.id,
+        originMerchantIds: [merchant.id],
         eligibilityType: 'merchant_wide',
         validityStart: '2026-09-01',
         validityEnd: '2026-09-30'
@@ -1014,7 +1018,7 @@ describe('admin routes', () => {
         merchantId: merchant.id,
         paymentMethodId: paymentMethod.id,
         originType: 'merchant',
-        originMerchantId: merchant.id,
+        originMerchantIds: [merchant.id],
         eligibilityType: 'selected_branches',
         eligibleBranchIds: [branch.id],
         excludedMerchantIds: [],
@@ -1045,13 +1049,30 @@ describe('admin routes', () => {
       benefitType: 'fixed_discount',
       fixedDiscountAmount: 30,
       cashbackRate: null,
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibleBranchIds: [branch.id],
       sourceUrl: 'https://official.example/promotion',
       promotionNote: '不含藥品，總折抵名額有限'
     });
 
     await expect(prisma.rewardRule.count()).resolves.toBe(0);
+
+    const list = await request(app)
+      .get('/api/admin/promotions')
+      .set('X-Admin-API-Key', 'test-admin-key');
+    expect(list.status).toBe(200);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0]).toMatchObject({
+      id: response.body.data.promotion.id,
+      eligibilityType: 'selected_branches',
+      fixedDiscountAmount: 30,
+      eligibleBranchIds: [branch.id],
+      validityStart: '2026-10-01',
+      validityEnd: '2026-12-31'
+    });
+
+    const unauthorized = await request(app).get('/api/admin/promotions');
+    expect(unauthorized.status).toBe(401);
   });
 
   test('publishes without requiring acceptance mapping until recommendation time', async () => {
@@ -1062,7 +1083,7 @@ describe('admin routes', () => {
       merchantId: merchant.id,
       paymentMethodId: paymentMethod.id,
       originType: 'merchant',
-      originMerchantId: merchant.id,
+      originMerchantIds: [merchant.id],
       eligibilityType: 'merchant_wide',
       paymentMethodIds: [paymentMethod.id],
       cashbackRate: 0.05,
@@ -1076,7 +1097,7 @@ describe('admin routes', () => {
       .set('X-Admin-API-Key', 'test-admin-key');
 
     expect(response.status).toBe(201);
-    expect(response.body.data.promotion.originMerchantId).toBe(merchant.id);
+    expect(response.body.data.promotion.originMerchantIds).toEqual([merchant.id]);
     await expect(listPromotionDrafts('pending_review')).resolves.toHaveLength(0);
   });
 

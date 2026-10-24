@@ -17,6 +17,8 @@ export const paymentMethods = [
   { name: 'Cash', type: 'debit_card' }
 ] as const;
 
+export const paymentMethodTypes = ['credit_card', 'debit_card', 'mobile_payment', 'transit_card'] as const;
+
 export const merchantPaymentAcceptances = [
   { merchantName: 'FamilyMart', paymentMethodName: 'LINE Pay' },
   { merchantName: 'FamilyMart', paymentMethodName: 'VISA' },
@@ -50,6 +52,10 @@ export async function seedDatabase(prisma: PrismaClient) {
         chainName: merchant.chainName
       }
     });
+  }
+
+  for (const name of paymentMethodTypes) {
+    await prisma.paymentMethodType.upsert({ where: { name }, update: {}, create: { name } });
   }
 
   for (const method of paymentMethods) {

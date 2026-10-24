@@ -101,11 +101,12 @@ not publish automatically. An approved draft creates a canonical `Promotion`
 record, which can affect public recommendations.
 
 Reward rules support both percentage cashback and fixed cash discounts. Admins
-can manage shopping Outlets (physical venues) separately from Merchant
-branches. A promotion may originate from a Merchant or a shopping Outlet;
-Merchant promotions may apply Merchant-wide or to selected branches, while
-Outlet promotions apply at one exact Outlet and can exclude Merchants or
-branches. Recommendations use selected catalog IDs, not names or inferred
+can manage shopping Outlets/Malls (physical venues) separately from Merchant
+branches. A promotion may originate from one or more Merchants or one or more
+shopping Outlets/Malls (`originMerchantIds` / `originOutletIds`, one type per
+promotion); Merchant promotions may apply Merchant-wide or to selected
+branches, while Outlet/Mall promotions apply at any listed Outlet and can
+exclude Merchants or branches. Recommendations use selected catalog IDs, not names or inferred
 locations. Review notes for exclusions or limited quantities are shown with
 the result, alongside a link to the official promotion terms.
 
@@ -122,7 +123,7 @@ that is no longer publicly permitted.
 2. Use the **Imported promotions** section to inspect recent import runs and
    pending drafts, including the official source URL, captured source text, and
    parsed values.
-3. Add any missing Merchant branches, shopping Outlets, or payment methods.
+3. Add any missing Merchant branches, shopping Outlets/Malls, or payment methods.
    Configure accepted payment methods for Merchants as needed; acceptance is
    checked when recommendations are generated.
 4. Save the reviewed origin, eligibility, payment methods, included branches,
@@ -130,7 +131,7 @@ that is no longer publicly permitted.
 5. Publish the draft to create a canonical `Promotion`, or reject it with a
    reason to keep it out of recommendations. Rejected drafts can be reopened
    for review; importing the same activity does not reopen them automatically.
-6. On the public page, choose the Merchant branch and/or shopping Outlet
+6. On the public page, choose the Merchant branch and/or shopping Outlet/Mall
    explicitly to include matching location-specific promotions.
 
 ## Test isolation
@@ -154,6 +155,7 @@ The backend now includes a lightweight admin catalog for merchants and reward ru
 - `GET /api/admin/reward-rules`
 - `POST /api/admin/reward-rules` with rule payload
 - `DELETE /api/admin/reward-rules/:id`
+- `GET /api/admin/promotions` (read-only list of published promotions)
 
 All Admin API endpoints require `X-Admin-API-Key`. Requests without a key
 return `401`; requests with an incorrect key return `403`.
@@ -166,7 +168,8 @@ endpoints to manage merchants, payment methods, and merchant acceptance
 mappings:
 
 - `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/merchants`
-- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/payment-methods`
+- `GET`, `POST`, `PATCH`, and `DELETE` `/api/admin/payment-methods` (`type` must exist in the type catalog)
+- `GET`, `POST` `/api/admin/payment-method-types` and `DELETE` `/api/admin/payment-method-types/:id` (names are lowercase `a-z0-9_`; types in use cannot be deleted)
 - `GET`, `PUT`, and `DELETE` `/api/admin/merchants/:merchantId/payment-methods/:paymentMethodId`
 
 Configure a merchant in this order: create the merchant, create or choose a

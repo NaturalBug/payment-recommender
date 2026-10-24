@@ -46,8 +46,8 @@ type PromotionDraftRow = {
   validityEndReviewed: boolean;
   status: string;
   originType: string | null;
-  originMerchantId: number | null;
-  originOutletId: number | null;
+  originMerchants: { merchantId: number }[];
+  originOutlets: { outletId: number }[];
   eligibilityType: string | null;
   eligibleBranches: { branchId: number }[];
   excludedMerchants: { merchantId: number }[];
@@ -108,8 +108,8 @@ const promotionDraftSelect = {
   validityEndReviewed: true,
   status: true,
   originType: true,
-  originMerchantId: true,
-  originOutletId: true,
+  originMerchants: { select: { merchantId: true } },
+  originOutlets: { select: { outletId: true } },
   eligibilityType: true,
   eligibleBranches: { select: { branchId: true } },
   excludedMerchants: { select: { merchantId: true } },
@@ -174,8 +174,8 @@ function toPromotionDraftRecord(row: PromotionDraftRow): PromotionDraftRecord {
     validityEndReviewed: row.validityEndReviewed,
     status: row.status as PromotionDraftStatus,
     originType: row.originType as PromotionDraftRecord['originType'],
-    originMerchantId: row.originMerchantId,
-    originOutletId: row.originOutletId,
+    originMerchantIds: row.originMerchants.map(({ merchantId }) => merchantId),
+    originOutletIds: row.originOutlets.map(({ outletId }) => outletId),
     eligibilityType: row.eligibilityType as PromotionDraftRecord['eligibilityType'],
     eligibleBranchIds: row.eligibleBranches.map(({ branchId }) => branchId),
     excludedMerchantIds: row.excludedMerchants.map(({ merchantId }) => merchantId),
@@ -213,12 +213,12 @@ function validateReviewedPromotion(draft: PromotionDraftRow): asserts draft is P
 } {
   const validMerchantOrigin =
     draft.originType === 'merchant' &&
-    draft.originMerchantId !== null &&
-    draft.originOutletId === null;
+    draft.originMerchants.length > 0 &&
+    draft.originOutlets.length === 0;
   const validOutletOrigin =
     draft.originType === 'outlet' &&
-    draft.originOutletId !== null &&
-    draft.originMerchantId === null;
+    draft.originOutlets.length > 0 &&
+    draft.originMerchants.length === 0;
   const validEligibility =
     (draft.originType === 'merchant' &&
       (draft.eligibilityType === 'merchant_wide' || draft.eligibilityType === 'selected_branches')) ||
@@ -348,26 +348,18 @@ async function writePendingDraft(
       where: { id },
       select: {
         originType: true,
-        originMerchantId: true,
-        originOutletId: true,
+        originMerchants: { select: { merchantId: true } },
+        originOutlets: { select: { outletId: true } },
         eligibilityType: true
       }
     });
     const updateData = { ...data };
     if (scope?.originType !== undefined) {
-      if (scope.originType === 'merchant') {
-        if (scope.originOutletId != null) {
-          throw new RepositoryValidationError('merchant origin cannot include an origin outlet');
-        }
-        updateData.originOutletId = null;
-      } else if (scope.originType === 'outlet') {
-        if (scope.originMerchantId != null) {
-          throw new RepositoryValidationError('outlet origin cannot include an origin merchant');
-        }
-        updateData.originMerchantId = null;
-      } else {
-        updateData.originMerchantId = null;
-        updateData.originOutletId = null;
+      if (scope.originType === 'merchant' && scope.originOutletIds?.length) {
+        throw new RepositoryValidationError('merchant origin cannot include an origin outlet');
+      }
+      if (scope.originType === 'outlet' && scope.originMerchantIds?.length) {
+        throw new RepositoryValidationError('outlet origin cannot include an origin merchant');
       }
       if (scope.originType === null || scope.originType !== previousDraft?.originType) {
         updateData.eligibilityType = scope.eligibilityType ?? null;
@@ -384,7 +376,12 @@ async function writePendingDraft(
 
     if (updatedDrafts.count === 1) {
       if (scope) {
-        await replaceDraftScope(transaction, id, scope, previousDraft);
+        await replaceDraftScope(transaction, id, scope, previousDraft && {
+          originType: previousDraft.originType,
+          originMerchantIds: previousDraft.originMerchants.map(({ merchantId }) => merchantId),
+          originOutletIds: previousDraft.originOutlets.map(({ outletId }) => outletId),
+          eligibilityType: previousDraft.eligibilityType
+        });
       }
       const updatedDraft = await transaction.promotionDraft.findUniqueOrThrow({
         where: { id },
@@ -425,8 +422,8 @@ async function replaceDraftScope(
   input: PromotionDraftReviewInput,
   previousDraft: {
     originType: string | null;
-    originMerchantId: number | null;
-    originOutletId: number | null;
+    originMerchantIds: number[];
+    originOutletIds: number[];
     eligibilityType: string | null;
   } | null
 ): Promise<void> {
@@ -434,43 +431,37 @@ async function replaceDraftScope(
   const suppliedExcludedMerchantIds = validateScopeIds(input.excludedMerchantIds, 'excludedMerchantIds');
   const suppliedExcludedBranchIds = validateScopeIds(input.excludedBranchIds, 'excludedBranchIds');
   const paymentMethodIds = validateScopeIds(input.paymentMethodIds, 'paymentMethodIds');
+  const suppliedOriginMerchantIds = validateScopeIds(input.originMerchantIds, 'originMerchantIds');
+  const suppliedOriginOutletIds = validateScopeIds(input.originOutletIds, 'originOutletIds');
   const originType = input.originType !== undefined ? input.originType : previousDraft?.originType;
-  const originMerchantId =
-    input.originMerchantId !== undefined ? input.originMerchantId : previousDraft?.originMerchantId;
-  const originOutletId =
-    input.originOutletId !== undefined ? input.originOutletId : previousDraft?.originOutletId;
+  const originMerchantIds = originType === 'merchant'
+    ? suppliedOriginMerchantIds ?? previousDraft?.originMerchantIds ?? []
+    : [];
+  const originOutletIds = originType === 'outlet'
+    ? suppliedOriginOutletIds ?? previousDraft?.originOutletIds ?? []
+    : [];
+  const originChanged =
+    input.originType !== undefined || suppliedOriginMerchantIds !== undefined || suppliedOriginOutletIds !== undefined;
   const eligibilityType =
     input.eligibilityType !== undefined ? input.eligibilityType : previousDraft?.eligibilityType;
   const eligibleBranchIds = suppliedEligibleBranchIds ?? (
-    originType !== 'merchant' ||
-    eligibilityType !== 'selected_branches' ||
-    originMerchantId !== previousDraft?.originMerchantId
-      ? []
-      : undefined
+    originType !== 'merchant' || eligibilityType !== 'selected_branches' ? [] : undefined
   );
   const excludedMerchantIds = suppliedExcludedMerchantIds ?? (originType === 'outlet' ? undefined : []);
-  const excludedBranchIds = suppliedExcludedBranchIds ?? (
-    originType !== 'outlet' || originOutletId !== previousDraft?.originOutletId ? [] : undefined
-  );
+  const excludedBranchIds = suppliedExcludedBranchIds ?? (originType !== 'outlet' ? [] : undefined);
 
-  if (originMerchantId != null) {
-    const merchant = await transaction.merchant.findUnique({
-      where: { id: originMerchantId },
-      select: { id: true }
-    });
-    if (!merchant) throw new RepositoryValidationError('origin merchant is invalid');
+  if (originMerchantIds.length) {
+    const count = await transaction.merchant.count({ where: { id: { in: originMerchantIds } } });
+    if (count !== originMerchantIds.length) throw new RepositoryValidationError('origin merchant is invalid');
   }
-  if (originOutletId != null) {
-    const outlet = await transaction.outlet.findUnique({
-      where: { id: originOutletId },
-      select: { id: true }
-    });
-    if (!outlet) throw new RepositoryValidationError('origin outlet is invalid');
+  if (originOutletIds.length) {
+    const count = await transaction.outlet.count({ where: { id: { in: originOutletIds } } });
+    if (count !== originOutletIds.length) throw new RepositoryValidationError('origin outlet is invalid');
   }
-  if (originType === 'merchant' && originMerchantId == null) {
+  if (originType === 'merchant' && originMerchantIds.length === 0) {
     throw new RepositoryValidationError('merchant origin requires an origin merchant');
   }
-  if (originType === 'outlet' && originOutletId == null) {
+  if (originType === 'outlet' && originOutletIds.length === 0) {
     throw new RepositoryValidationError('outlet origin requires an origin outlet');
   }
 
@@ -484,8 +475,7 @@ async function replaceDraftScope(
     }
     if (
       originType === 'merchant' &&
-      typeof originMerchantId === 'number' &&
-      branches.some((branch) => branch.merchantId !== originMerchantId)
+      branches.some((branch) => !originMerchantIds.includes(branch.merchantId))
     ) {
       throw new RepositoryValidationError('eligible branches must belong to the origin merchant');
     }
@@ -507,6 +497,40 @@ async function replaceDraftScope(
     const count = await transaction.paymentMethod.count({ where: { id: { in: paymentMethodIds } } });
     if (count !== paymentMethodIds.length) {
       throw new RepositoryValidationError('payment methods contain an unknown ID');
+    }
+  }
+
+  if (originChanged) {
+    await transaction.promotionDraftOriginMerchant.deleteMany({ where: { draftId } });
+    await transaction.promotionDraftOriginOutlet.deleteMany({ where: { draftId } });
+    if (originMerchantIds.length) {
+      await transaction.promotionDraftOriginMerchant.createMany({
+        data: originMerchantIds.map((merchantId) => ({ draftId, merchantId }))
+      });
+    }
+    if (originOutletIds.length) {
+      await transaction.promotionDraftOriginOutlet.createMany({
+        data: originOutletIds.map((outletId) => ({ draftId, outletId }))
+      });
+    }
+    if (eligibleBranchIds === undefined) {
+      await transaction.promotionDraftEligibleBranch.deleteMany({
+        where: { draftId, branch: { merchantId: { notIn: originMerchantIds } } }
+      });
+    }
+    if (excludedBranchIds === undefined) {
+      const kept = await transaction.promotionDraftExcludedBranch.findMany({
+        where: { draftId },
+        select: { branchId: true, branch: { select: { outletId: true } } }
+      });
+      const stale = kept
+        .filter(({ branch }) => branch.outletId === null || !originOutletIds.includes(branch.outletId))
+        .map(({ branchId }) => branchId);
+      if (stale.length) {
+        await transaction.promotionDraftExcludedBranch.deleteMany({
+          where: { draftId, branchId: { in: stale } }
+        });
+      }
     }
   }
 
@@ -686,8 +710,6 @@ export async function updatePromotionDraft(
   if (input.merchantId !== undefined) data.merchantId = input.merchantId;
   if (input.paymentMethodId !== undefined) data.paymentMethodId = input.paymentMethodId;
   if (input.originType !== undefined) data.originType = input.originType;
-  if (input.originMerchantId !== undefined) data.originMerchantId = input.originMerchantId;
-  if (input.originOutletId !== undefined) data.originOutletId = input.originOutletId;
   if (input.eligibilityType !== undefined) data.eligibilityType = input.eligibilityType;
   if (input.benefitType !== undefined) {
     data.benefitType = input.benefitType ?? 'cashback';
@@ -792,16 +814,12 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
 
       ensureDraftIsEditable(draft);
       validateReviewedPromotion(draft);
-      const origin = draft.originType === 'merchant'
-        ? await transaction.merchant.findUnique({
-            where: { id: draft.originMerchantId! },
-            select: { id: true }
-          })
-        : await transaction.outlet.findUnique({
-            where: { id: draft.originOutletId! },
-            select: { id: true }
-          });
-      if (!origin) {
+      const originMerchantIds = draft.originMerchants.map(({ merchantId }) => merchantId);
+      const originOutletIds = draft.originOutlets.map(({ outletId }) => outletId);
+      const originCount = draft.originType === 'merchant'
+        ? await transaction.merchant.count({ where: { id: { in: originMerchantIds } } })
+        : await transaction.outlet.count({ where: { id: { in: originOutletIds } } });
+      if (originCount !== (draft.originType === 'merchant' ? originMerchantIds : originOutletIds).length) {
         throw new RepositoryConflictError('promotion origin is no longer available');
       }
       const paymentMethodIds = draft.paymentMethods.map(({ paymentMethodId }) => paymentMethodId);
@@ -815,7 +833,7 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
       const excludedBranchIds = draft.excludedBranches.map(({ branchId }) => branchId);
       if (draft.originType === 'merchant' && eligibleBranchIds.length) {
         const branchCount = await transaction.merchantBranch.count({
-          where: { id: { in: eligibleBranchIds }, merchantId: draft.originMerchantId! }
+          where: { id: { in: eligibleBranchIds }, merchantId: { in: originMerchantIds } }
         });
         if (branchCount !== eligibleBranchIds.length) {
           throw new RepositoryValidationError('eligible branches must belong to the origin merchant');
@@ -823,7 +841,7 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
       }
       if (draft.originType === 'outlet' && excludedBranchIds.length) {
         const branchCount = await transaction.merchantBranch.count({
-          where: { id: { in: excludedBranchIds }, outletId: draft.originOutletId! }
+          where: { id: { in: excludedBranchIds }, outletId: { in: originOutletIds } }
         });
         if (branchCount !== excludedBranchIds.length) {
           throw new RepositoryValidationError('excluded branches must belong to the origin outlet');
@@ -833,8 +851,12 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
         data: {
           sourceDraft: { connect: { id: draft.id } },
           originType: draft.originType,
-          originMerchant: draft.originMerchantId ? { connect: { id: draft.originMerchantId } } : undefined,
-          originOutlet: draft.originOutletId ? { connect: { id: draft.originOutletId } } : undefined,
+          originMerchants: {
+            create: originMerchantIds.map((merchantId) => ({ merchant: { connect: { id: merchantId } } }))
+          },
+          originOutlets: {
+            create: originOutletIds.map((outletId) => ({ outlet: { connect: { id: outletId } } }))
+          },
           eligibilityType: draft.eligibilityType,
           benefitType: draft.benefitType,
           cashbackRate: draft.benefitType === 'cashback' ? Number(draft.cashbackRate) : null,

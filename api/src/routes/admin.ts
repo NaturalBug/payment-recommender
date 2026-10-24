@@ -15,6 +15,12 @@ import {
   updatePaymentMethod
 } from '../repositories/paymentMethodRepository';
 import {
+  createPaymentMethodType,
+  deletePaymentMethodType,
+  listPaymentMethodTypes,
+  paymentMethodTypeExists
+} from '../repositories/paymentMethodTypeRepository';
+import {
   addAcceptance,
   listAcceptedPaymentMethods,
   removeAcceptance
@@ -35,6 +41,7 @@ import {
   rejectPromotionDraft,
   updatePromotionDraft
 } from '../repositories/promotionImportRepository';
+import { listPromotions } from '../repositories/promotionRepository';
 import {
   MerchantAlreadyExistsError,
   RepositoryConflictError,
@@ -53,8 +60,8 @@ const router = Router();
 const promotionDraftStatuses: PromotionDraftStatus[] = ['pending_review', 'published', 'rejected'];
 const promotionDraftReviewFields = [
   'originType',
-  'originMerchantId',
-  'originOutletId',
+  'originMerchantIds',
+  'originOutletIds',
   'eligibilityType',
   'eligibleBranchIds',
   'excludedMerchantIds',
@@ -171,19 +178,6 @@ function parsePromotionDraftReviewPatch(
     patch.originType = values.originType;
   }
 
-  for (const field of ['originMerchantId', 'originOutletId'] as const) {
-    if (!hasOwn(values, field)) continue;
-    if (values[field] === null) {
-      patch[field] = null;
-      continue;
-    }
-    const parsed = parseNumericValue(values[field], field);
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-      throw new RepositoryValidationError(`${field} must be a positive integer`);
-    }
-    patch[field] = parsed;
-  }
-
   if (hasOwn(values, 'eligibilityType')) {
     const eligibilityTypes = ['merchant_wide', 'selected_branches', 'outlet'];
     if (values.eligibilityType !== null && !eligibilityTypes.includes(String(values.eligibilityType))) {
@@ -192,7 +186,7 @@ function parsePromotionDraftReviewPatch(
     patch.eligibilityType = values.eligibilityType as PromotionDraftReviewInput['eligibilityType'];
   }
 
-  for (const field of ['eligibleBranchIds', 'excludedMerchantIds', 'excludedBranchIds', 'paymentMethodIds'] as const) {
+  for (const field of ['originMerchantIds', 'originOutletIds', 'eligibleBranchIds', 'excludedMerchantIds', 'excludedBranchIds', 'paymentMethodIds'] as const) {
     if (!hasOwn(values, field)) continue;
     if (!Array.isArray(values[field])) {
       throw new RepositoryValidationError(`${field} must be an array of positive integer IDs`);
@@ -570,6 +564,61 @@ router.post('/merchants/:merchantId/branches', createBranchHandler);
 router.post('/merchants/:merchantId/outlets', createBranchHandler);
 
 // ---------------------------------------------------------------------------
+// Payment Method Types
+// ---------------------------------------------------------------------------
+
+router.get('/payment-method-types', async (_req, res) => {
+  try {
+    return res.json({ success: true, data: await listPaymentMethodTypes() });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list payment method types'
+    });
+  }
+});
+
+router.post('/payment-method-types', async (req, res) => {
+  try {
+    const created = await createPaymentMethodType(String(req.body?.name ?? ''));
+    return res.status(201).json({ success: true, data: created });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    if (error instanceof RepositoryValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to create payment method type'
+    });
+  }
+});
+
+router.delete('/payment-method-types/:id', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'payment method type not found' });
+  }
+
+  try {
+    if (!(await deletePaymentMethodType(id))) {
+      return res.status(404).json({ success: false, message: 'payment method type not found' });
+    }
+    return res.json({ success: true, data: { deleted: true } });
+  } catch (error) {
+    if (error instanceof RepositoryConflictError) {
+      return res.status(409).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to delete payment method type'
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Payment Methods
 // ---------------------------------------------------------------------------
 
@@ -597,6 +646,13 @@ router.post('/payment-methods', async (req, res) => {
   }
 
   try {
+    if (!(await paymentMethodTypeExists(type))) {
+      return res.status(400).json({
+        success: false,
+        message: 'payment method type is not in the catalog'
+      });
+    }
+
     const paymentMethod = await createPaymentMethod({ name, type });
     return res.status(201).json({
       success: true,
@@ -657,6 +713,13 @@ router.patch('/payment-methods/:id', async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'payment method not found'
+      });
+    }
+
+    if (rawType !== undefined && !(await paymentMethodTypeExists(String(rawType).trim()))) {
+      return res.status(400).json({
+        success: false,
+        message: 'payment method type is not in the catalog'
       });
     }
 
@@ -861,6 +924,18 @@ router.get('/import-runs', async (_req, res) => {
     return res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : 'unable to list import runs'
+    });
+  }
+});
+
+router.get('/promotions', async (_req, res) => {
+  try {
+    const promotions = await listPromotions();
+    return res.json({ success: true, data: promotions.map(serializePromotion) });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'unable to list promotions'
     });
   }
 });

@@ -8,6 +8,10 @@ const refreshCatalogButton = document.getElementById('refresh-catalog');
 const catalogStatus = document.getElementById('catalog-status');
 const merchantsContainer = document.getElementById('merchants');
 const paymentMethodsContainer = document.getElementById('payment-methods');
+const paymentMethodTypeForm = document.getElementById('payment-method-type-form');
+const paymentMethodTypesContainer = document.getElementById('payment-method-types');
+const paymentMethodTypeUsage = document.getElementById('payment-method-type-usage');
+const paymentMethodTypeSelect = document.getElementById('payment-method-type');
 const outletsContainer = document.getElementById('outlets');
 const branchesContainer = document.getElementById('branches');
 const acceptanceMerchantSelect = document.getElementById('acceptance-merchant');
@@ -15,6 +19,7 @@ const branchMerchantSelect = document.getElementById('branch-merchant');
 const branchOutletSelect = document.getElementById('branch-outlet');
 const acceptedPaymentMethods = document.getElementById('accepted-payment-methods');
 const rewardRules = document.getElementById('reward-rules');
+const publishedPromotionsContainer = document.getElementById('published-promotions');
 const ruleOutletSelect = document.getElementById('rule-outlet');
 const benefitTypeSelect = document.getElementById('benefit-type');
 const cashbackRateInput = document.getElementById('cashback-rate');
@@ -31,6 +36,8 @@ const today = new Date().toISOString().slice(0, 10);
 let adminApiKey = '';
 let merchants = [];
 let paymentMethods = [];
+let publishedPromotions = [];
+let paymentMethodTypes = [];
 let physicalOutlets = [];
 let merchantBranches = [];
 let importRuns = [];
@@ -133,6 +140,11 @@ async function fetchPaymentMethods() {
   return json.data || [];
 }
 
+async function fetchPaymentMethodTypes() {
+  const json = await requestJson('/api/admin/payment-method-types');
+  return json.data || [];
+}
+
 async function fetchMerchantBranches(merchantId) {
   const json = await requestJson(`/api/admin/merchants/${encodeURIComponent(merchantId)}/branches`);
   return json.data || [];
@@ -140,6 +152,11 @@ async function fetchMerchantBranches(merchantId) {
 
 async function fetchOutlets() {
   const json = await requestJson('/api/admin/outlets');
+  return json.data || [];
+}
+
+async function fetchPublishedPromotions() {
+  const json = await requestJson('/api/admin/promotions');
   return json.data || [];
 }
 
@@ -225,6 +242,70 @@ function renderMerchants() {
   `;
 }
 
+function paymentMethodTypeOptions(selected) {
+  const names = paymentMethodTypes.map((type) => type.name);
+  if (selected && !names.includes(selected)) {
+    names.unshift(selected);
+  }
+  return names.map((name) => `<option value="${escapeHtml(name)}"${name === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('');
+}
+
+function renderPaymentMethodTypes() {
+  const previous = paymentMethodTypeSelect.value;
+  paymentMethodTypeSelect.innerHTML = paymentMethodTypeOptions(previous);
+  paymentMethodTypeUsage.hidden = true;
+
+  if (!paymentMethodTypes.length) {
+    paymentMethodTypesContainer.innerHTML = '<p class="muted">No payment method types configured.</p>';
+    return;
+  }
+
+  paymentMethodTypesContainer.innerHTML = `
+    <table>
+      <thead><tr><th>Type</th><th>Payment methods</th><th></th></tr></thead>
+      <tbody>
+        ${paymentMethodTypes.map((type) => `
+          <tr>
+            <td>${escapeHtml(type.name)}</td>
+            <td>${escapeHtml(type.paymentMethodCount)}</td>
+            <td class="table-actions">
+              <button class="danger-button delete-payment-method-type" type="button" data-type-id="${type.id}">Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderTypeUsage(type, users) {
+  const others = paymentMethodTypes.filter((item) => item.id !== type.id);
+  paymentMethodTypeUsage.dataset.typeId = String(type.id);
+  paymentMethodTypeUsage.hidden = false;
+  paymentMethodTypeUsage.innerHTML = `
+    <p>Type "${escapeHtml(type.name)}" is still used by ${users.length} payment method(s). Choose what to do with each one, then delete the type again.</p>
+    <table>
+      <tbody>
+        ${users.map((method) => `
+          <tr>
+            <td>${escapeHtml(method.name)}</td>
+            <td>
+              <select data-payment-method-id="${method.id}" aria-label="New type for ${escapeHtml(method.name)}">
+                ${others.map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')}
+              </select>
+            </td>
+            <td class="table-actions">
+              <button class="secondary-button type-usage-move" type="button" data-payment-method-id="${method.id}"${others.length ? '' : ' disabled'}>Change type</button>
+              <button class="danger-button type-usage-delete" type="button" data-payment-method-id="${method.id}">Delete method</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <button class="secondary-button type-usage-close" type="button">Keep as is</button>
+  `;
+}
+
 function renderPaymentMethods() {
   if (!paymentMethods.length) {
     paymentMethodsContainer.innerHTML = '<p class="muted">No payment methods configured.</p>';
@@ -238,9 +319,13 @@ function renderPaymentMethods() {
         ${paymentMethods.map((method) => `
           <tr>
             <td>${escapeHtml(method.name)}</td>
-            <td>${escapeHtml(method.type)}</td>
+            <td>
+              <select class="payment-method-type-select" data-payment-method-id="${method.id}" aria-label="Type for ${escapeHtml(method.name)}">
+                ${paymentMethodTypeOptions(method.type)}
+              </select>
+            </td>
             <td class="table-actions">
-              <button class="secondary-button edit-payment-method" type="button" data-payment-method-id="${method.id}">Edit</button>
+              <button class="secondary-button edit-payment-method" type="button" data-payment-method-id="${method.id}">Rename</button>
               <button class="danger-button delete-payment-method" type="button" data-payment-method-id="${method.id}">Delete</button>
             </td>
           </tr>
@@ -263,13 +348,57 @@ function renderRewardRules(rules) {
         ${rules.map((rule) => `
           <tr>
             <td>${escapeHtml(rule.merchantName)}</td>
-            <td>${escapeHtml(rule.paymentMethodId)}</td>
+            <td>${escapeHtml(paymentMethods.find((method) => method.id === rule.paymentMethodId)?.name ?? rule.paymentMethodId)}</td>
             <td>${rule.benefitType === 'fixed_discount'
               ? `NT$ ${escapeHtml(rule.fixedDiscountAmount)} off`
               : `${(Number(rule.cashbackRate) * 100).toFixed(2)}% cashback`}</td>
             <td>${escapeHtml(rule.outletName || 'All branches')}</td>
             <td>${escapeHtml(rule.validityStart)} - ${escapeHtml(rule.validityEnd)}</td>
             <td><button class="danger-button delete-rule" type="button" data-rule-id="${escapeHtml(rule.id)}">Delete</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderPublishedPromotions() {
+  if (!publishedPromotions.length) {
+    publishedPromotionsContainer.innerHTML = '<p class="muted">No published promotions.</p>';
+    return;
+  }
+
+  const names = (ids, items) => ids
+    .map((id) => items.find((item) => item.id === id)?.name ?? `#${id}`)
+    .join(', ');
+  const branchNames = (ids) => ids.map((id) => {
+    const branch = merchantBranches.find((item) => item.id === id);
+    return branch ? `${findMerchantName(branch.merchantId)} — ${branch.name}` : `#${id}`;
+  }).join(', ');
+  const scopeLabel = (promotion) => promotion.eligibilityType === 'selected_branches'
+    ? names(promotion.eligibleBranchIds, merchantBranches) || '-'
+    : 'All branches';
+  const origin = (promotion) => promotion.originType === 'outlet'
+    ? names(promotion.originOutletIds, physicalOutlets)
+    : names(promotion.originMerchantIds, merchants);
+
+  publishedPromotionsContainer.innerHTML = `
+    <table>
+      <thead><tr><th>Origin</th><th>Scope</th><th>Payment methods</th><th>Benefit</th><th>Excluded</th><th>Validity</th></tr></thead>
+      <tbody>
+        ${publishedPromotions.map((promotion) => `
+          <tr>
+            <td>${escapeHtml(origin(promotion))}</td>
+            <td>${escapeHtml(scopeLabel(promotion))}</td>
+            <td>${escapeHtml(names(promotion.paymentMethodIds, paymentMethods))}</td>
+            <td>${promotion.benefitType === 'fixed_discount'
+              ? `NT$ ${escapeHtml(promotion.fixedDiscountAmount)} off`
+              : `${(Number(promotion.cashbackRate) * 100).toFixed(2)}% cashback`}, min NT$ ${escapeHtml(promotion.amountThreshold)}</td>
+            <td>${escapeHtml([
+              names(promotion.excludedMerchantIds, merchants),
+              branchNames(promotion.excludedBranchIds)
+            ].filter(Boolean).join(', ') || '-')}</td>
+            <td>${escapeHtml(promotion.validityStart)} - ${escapeHtml(promotion.validityEnd)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -285,7 +414,7 @@ function renderOutlets() {
 
   outletsContainer.innerHTML = `
     <table>
-      <thead><tr><th>Shopping Outlet</th><th>Location</th></tr></thead>
+      <thead><tr><th>Shopping Outlet/Mall</th><th>Location</th></tr></thead>
       <tbody>${physicalOutlets.map((outlet) => `
         <tr>
           <td>${escapeHtml(outlet.name)}</td>
@@ -304,7 +433,7 @@ function renderBranches() {
 
   branchesContainer.innerHTML = `
     <table>
-      <thead><tr><th>Merchant</th><th>Branch</th><th>Location</th><th>Shopping Outlet</th></tr></thead>
+      <thead><tr><th>Merchant</th><th>Branch</th><th>Location</th><th>Shopping Outlet/Mall</th></tr></thead>
       <tbody>${merchantBranches.map((branch) => `
         <tr>
           <td>${escapeHtml(findMerchantName(branch.merchantId))}</td>
@@ -384,14 +513,12 @@ function renderPromotionScopeOptions({ draft, disabled }) {
   const options = (items, selectedIds, label) => items.map((item) => `
     <option value="${item.id}"${selectedIds.has(item.id) ? ' selected' : ''}>${escapeHtml(label(item))}</option>
   `).join('');
-  const originMerchantOptions = [
-    '<option value="">Select origin Merchant</option>',
-    ...merchants.map((merchant) => `<option value="${merchant.id}"${merchant.id === draft.originMerchantId ? ' selected' : ''}>${escapeHtml(merchant.name)}</option>`)
-  ].join('');
-  const originOutletOptions = [
-    '<option value="">Select origin Outlet</option>',
-    ...physicalOutlets.map((outlet) => `<option value="${outlet.id}"${outlet.id === draft.originOutletId ? ' selected' : ''}>${escapeHtml(outlet.name)}${outlet.location ? ` — ${escapeHtml(outlet.location)}` : ''}</option>`)
-  ].join('');
+  const originMerchantOptions = options(merchants, new Set(draft.originMerchantIds || []), (merchant) => merchant.name);
+  const originOutletOptions = options(
+    physicalOutlets,
+    new Set(draft.originOutletIds || []),
+    (outlet) => `${outlet.name}${outlet.location ? ` — ${outlet.location}` : ''}`
+  );
   const branchOptions = (selectedIds) => merchantBranches.map((branch) => {
     const outlet = physicalOutlets.find((item) => item.id === branch.outletId);
     const location = [branch.location, outlet ? `at ${outlet.name}` : ''].filter(Boolean).join(' ');
@@ -405,16 +532,16 @@ function renderPromotionScopeOptions({ draft, disabled }) {
       <select name="originType"${disabledAttribute}>
         <option value="">Select origin</option>
         <option value="merchant"${draft.originType === 'merchant' ? ' selected' : ''}>Merchant</option>
-        <option value="outlet"${draft.originType === 'outlet' ? ' selected' : ''}>Shopping Outlet</option>
+        <option value="outlet"${draft.originType === 'outlet' ? ' selected' : ''}>Shopping Outlet/Mall</option>
       </select>
     </label>
     <label>
-      Origin Merchant
-      <select name="originMerchantId"${disabledAttribute}>${originMerchantOptions}</select>
+      Origin Merchants (select one or more)
+      <select name="originMerchantIds" multiple${disabledAttribute}>${originMerchantOptions}</select>
     </label>
     <label>
-      Origin Outlet
-      <select name="originOutletId"${disabledAttribute}>${originOutletOptions}</select>
+      Origin Shopping Outlets/Malls (select one or more)
+      <select name="originOutletIds" multiple${disabledAttribute}>${originOutletOptions}</select>
     </label>
     <label>
       Eligibility
@@ -590,8 +717,8 @@ function updatePromotionScopeControls(form) {
   const editable = form.dataset.draftStatus === 'pending_review';
   const originType = form.elements.namedItem('originType').value;
   const eligibilityType = form.elements.namedItem('eligibilityType').value;
-  form.elements.namedItem('originMerchantId').disabled = !editable || originType !== 'merchant';
-  form.elements.namedItem('originOutletId').disabled = !editable || originType !== 'outlet';
+  form.elements.namedItem('originMerchantIds').disabled = !editable || originType !== 'merchant';
+  form.elements.namedItem('originOutletIds').disabled = !editable || originType !== 'outlet';
   const eligibilitySelect = form.elements.namedItem('eligibilityType');
   eligibilitySelect.disabled = !editable || !originType;
   [...eligibilitySelect.options].forEach((option) => {
@@ -634,9 +761,11 @@ function setCatalogStatus(message, isError = false) {
 }
 
 async function refreshCatalog() {
-  const [merchantData, paymentMethodData, rewardRuleData, importRunData, promotionDraftData, outletData] = await Promise.all([
+  const [merchantData, paymentMethodData, paymentMethodTypeData, promotionData, rewardRuleData, importRunData, promotionDraftData, outletData] = await Promise.all([
     fetchMerchants(),
     fetchPaymentMethods(),
+    fetchPaymentMethodTypes(),
+    fetchPublishedPromotions(),
     fetchRewardRules(),
     fetchImportRuns(),
     fetchPromotionDrafts(),
@@ -644,6 +773,8 @@ async function refreshCatalog() {
   ]);
   merchants = merchantData;
   paymentMethods = paymentMethodData;
+  paymentMethodTypes = paymentMethodTypeData;
+  publishedPromotions = promotionData;
   physicalOutlets = outletData;
   merchantBranches = (await Promise.all(merchants.map((merchant) => fetchMerchantBranches(merchant.id)))).flat();
   importRuns = importRunData;
@@ -651,26 +782,20 @@ async function refreshCatalog() {
   renderMerchantOptions();
   renderPaymentMethodOptions();
   renderMerchants();
+  renderPaymentMethodTypes();
   renderPaymentMethods();
   renderOutlets();
   renderBranches();
   renderRewardRules(rewardRuleData);
+  renderPublishedPromotions();
   renderImportRuns();
   await renderAcceptedPaymentMethods();
   renderPromotionDrafts();
   setCatalogStatus(`Loaded ${merchants.length} merchants, ${paymentMethods.length} payment methods, ${rewardRuleData.length} reward rules, ${importRuns.length} import runs, and ${promotionDrafts.length} imported promotion drafts.`);
 }
 
-function getFormNumericValue(form, fieldName) {
-  const element = form.elements.namedItem(fieldName);
-  const value = element?.value?.trim?.() ?? '';
-  return value ? Number(value) : null;
-}
-
 function collectPromotionDraftReviewPayload(form) {
   const selectedIds = (fieldName) => [...form.elements.namedItem(fieldName).selectedOptions].map((option) => Number(option.value));
-  const originMerchantId = getFormNumericValue(form, 'originMerchantId');
-  const originOutletId = getFormNumericValue(form, 'originOutletId');
   const eligibleBranchIds = selectedIds('eligibleBranchIds');
   const paymentMethodIds = selectedIds('paymentMethodIds');
   const benefitType = form.elements.namedItem('benefitType').value;
@@ -683,8 +808,8 @@ function collectPromotionDraftReviewPayload(form) {
 
   const payload = {
     originType: form.elements.namedItem('originType').value || null,
-    originMerchantId,
-    originOutletId,
+    originMerchantIds: selectedIds('originMerchantIds'),
+    originOutletIds: selectedIds('originOutletIds'),
     eligibilityType: form.elements.namedItem('eligibilityType').value || null,
     eligibleBranchIds,
     excludedMerchantIds: selectedIds('excludedMerchantIds'),
@@ -803,7 +928,7 @@ physicalOutletForm.addEventListener('submit', async (event) => {
     });
     physicalOutletForm.reset();
     await refreshCatalog();
-    setCatalogStatus(`Added shopping Outlet "${name}".`);
+    setCatalogStatus(`Added shopping Outlet/Mall "${name}".`);
   } catch (error) {
     setCatalogStatus(error.message, true);
   }
@@ -859,6 +984,97 @@ merchantsContainer.addEventListener('click', async (event) => {
   }
 });
 
+paymentMethodsContainer.addEventListener('change', async (event) => {
+  const select = event.target.closest('.payment-method-type-select');
+  if (!select) {
+    return;
+  }
+  try {
+    await requestJson(`/api/admin/payment-methods/${encodeURIComponent(select.dataset.paymentMethodId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ type: select.value })
+    });
+    await refreshCatalog();
+    setCatalogStatus('Updated payment method type.');
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+    await refreshCatalog();
+  }
+});
+
+paymentMethodTypeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const name = document.getElementById('payment-method-type-name').value.trim();
+  try {
+    await requestJson('/api/admin/payment-method-types', {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    });
+    paymentMethodTypeForm.reset();
+    await refreshCatalog();
+    setCatalogStatus(`Added payment method type "${name.toLowerCase()}".`);
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+paymentMethodTypesContainer.addEventListener('click', async (event) => {
+  const button = event.target.closest('.delete-payment-method-type');
+  if (!button) {
+    return;
+  }
+  const type = paymentMethodTypes.find((item) => String(item.id) === button.dataset.typeId);
+  if (!type) {
+    return;
+  }
+  const users = paymentMethods.filter((method) => method.type === type.name);
+  if (users.length) {
+    renderTypeUsage(type, users);
+    return;
+  }
+  try {
+    await requestJson(`/api/admin/payment-method-types/${encodeURIComponent(type.id)}`, { method: 'DELETE' });
+    await refreshCatalog();
+    setCatalogStatus(`Deleted payment method type "${type.name}".`);
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+paymentMethodTypeUsage.addEventListener('click', async (event) => {
+  const button = event.target.closest('button');
+  if (!button) {
+    return;
+  }
+  if (button.classList.contains('type-usage-close')) {
+    paymentMethodTypeUsage.hidden = true;
+    return;
+  }
+  const methodId = button.dataset.paymentMethodId;
+  try {
+    if (button.classList.contains('type-usage-delete')) {
+      await requestJson(`/api/admin/payment-methods/${encodeURIComponent(methodId)}`, { method: 'DELETE' });
+    } else if (button.classList.contains('type-usage-move')) {
+      const select = paymentMethodTypeUsage.querySelector(`select[data-payment-method-id="${methodId}"]`);
+      await requestJson(`/api/admin/payment-methods/${encodeURIComponent(methodId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ type: select.value })
+      });
+    } else {
+      return;
+    }
+    const typeId = paymentMethodTypeUsage.dataset.typeId;
+    await refreshCatalog();
+    const type = paymentMethodTypes.find((item) => String(item.id) === typeId);
+    const users = type ? paymentMethods.filter((method) => method.type === type.name) : [];
+    if (type && users.length) {
+      renderTypeUsage(type, users);
+    }
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
 paymentMethodsContainer.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button) {
@@ -877,15 +1093,11 @@ paymentMethodsContainer.addEventListener('click', async (event) => {
       if (!name?.trim()) {
         return;
       }
-      const type = window.prompt('Payment method type', method.type);
-      if (!type?.trim()) {
-        return;
-      }
       await requestJson(`/api/admin/payment-methods/${encodeURIComponent(paymentMethodId)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name: name.trim(), type: type.trim() })
+        body: JSON.stringify({ name: name.trim() })
       });
-      setCatalogStatus('Updated payment method.');
+      setCatalogStatus('Renamed payment method.');
     } else if (button.classList.contains('delete-payment-method')) {
       await requestJson(`/api/admin/payment-methods/${encodeURIComponent(paymentMethodId)}`, { method: 'DELETE' });
       setCatalogStatus('Deleted payment method.');
@@ -935,15 +1147,21 @@ promotionDraftsContainer.addEventListener('change', (event) => {
   }
 
   const originType = form.elements.namedItem('originType');
-  const originMerchantId = form.elements.namedItem('originMerchantId');
-  const originOutletId = form.elements.namedItem('originOutletId');
+  const originMerchantIds = form.elements.namedItem('originMerchantIds');
+  const originOutletIds = form.elements.namedItem('originOutletIds');
+  const clearSelection = (select) => {
+    [...select.options].forEach((option) => {
+      option.selected = false;
+    });
+  };
+  const selectedValues = (select) => new Set([...select.selectedOptions].map((option) => option.value));
   const eligibilityType = form.elements.namedItem('eligibilityType');
   const eligibleBranchIds = form.elements.namedItem('eligibleBranchIds');
   const excludedBranchIds = form.elements.namedItem('excludedBranchIds');
 
   if (event.target === originType) {
     if (originType.value === 'merchant') {
-      originOutletId.value = '';
+      clearSelection(originOutletIds);
       if (eligibilityType.value === 'outlet') {
         eligibilityType.value = 'merchant_wide';
       }
@@ -957,14 +1175,14 @@ promotionDraftsContainer.addEventListener('change', (event) => {
         option.selected = false;
       });
     } else if (originType.value === 'outlet') {
-      originMerchantId.value = '';
+      clearSelection(originMerchantIds);
       eligibilityType.value = 'outlet';
       [...eligibleBranchIds.options].forEach((option) => {
         option.selected = false;
       });
     } else {
-      originMerchantId.value = '';
-      originOutletId.value = '';
+      clearSelection(originMerchantIds);
+      clearSelection(originOutletIds);
       eligibilityType.value = '';
       [...eligibleBranchIds.options].forEach((option) => {
         option.selected = false;
@@ -984,17 +1202,19 @@ promotionDraftsContainer.addEventListener('change', (event) => {
     });
   }
 
-  if (event.target === originMerchantId) {
+  if (event.target === originMerchantIds) {
+    const merchantIds = selectedValues(originMerchantIds);
     [...eligibleBranchIds.options].forEach((option) => {
-      if (option.dataset.merchantId !== originMerchantId.value) {
+      if (!merchantIds.has(option.dataset.merchantId)) {
         option.selected = false;
       }
     });
   }
 
-  if (event.target === originOutletId && originOutletId.value) {
+  if (event.target === originOutletIds && originOutletIds.selectedOptions.length) {
+    const outletIds = selectedValues(originOutletIds);
     [...excludedBranchIds.options].forEach((option) => {
-      if (option.dataset.outletId !== originOutletId.value) {
+      if (!outletIds.has(option.dataset.outletId)) {
         option.selected = false;
       }
     });
@@ -1097,6 +1317,34 @@ promotionDraftsContainer.addEventListener('click', async (event) => {
   } finally {
     setDraftFormPending(form, false);
   }
+});
+
+const tabNames = ['review', 'catalog', 'rules'];
+
+function showTab(name) {
+  const active = tabNames.includes(name) ? name : tabNames[0];
+  document.querySelectorAll('.tab-button').forEach((button) => {
+    const isActive = button.dataset.tab === active;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+  });
+  document.querySelectorAll('.tab-panel').forEach((panel) => {
+    panel.hidden = panel.dataset.tabPanel !== active;
+  });
+}
+
+document.querySelector('.tab-bar').addEventListener('click', (event) => {
+  const button = event.target.closest('.tab-button');
+  if (!button) {
+    return;
+  }
+  window.location.hash = button.dataset.tab;
+});
+window.addEventListener('hashchange', () => showTab(window.location.hash.slice(1)));
+showTab(window.location.hash.slice(1));
+
+document.querySelectorAll('.management-section > h2, .acceptance-section > h2, .rules-section > h2').forEach((heading) => {
+  heading.addEventListener('click', () => heading.parentElement.classList.toggle('is-collapsed'));
 });
 
 setCatalogStatus('Enter your Admin API key and connect to load the catalog.');

@@ -6,6 +6,7 @@ const branchSelect = document.getElementById('branch');
 const outletSelect = document.getElementById('outlet');
 const apiBaseUrl = `http://${window.location.hostname}:4000`;
 let shoppingOutlets = [];
+let merchantBranches = [];
 
 const DEFAULT_OPTIONS = {
   merchantName: 'FamilyMart',
@@ -82,6 +83,7 @@ async function populateOutletOptions() {
 
 async function populateBranchOptions() {
   const merchantId = merchantSelect.value;
+  merchantBranches = [];
   branchSelect.innerHTML = '<option value="">No branch selected</option>';
   if (!merchantId || !/^\d+$/.test(merchantId)) {
     return;
@@ -93,6 +95,7 @@ async function populateBranchOptions() {
   }
   const json = await response.json();
   const branches = json.data || [];
+  merchantBranches = branches;
   branchSelect.innerHTML = [
     '<option value="">No branch selected</option>',
     ...branches.map((branch) => {
@@ -146,7 +149,15 @@ merchantSelect.addEventListener('change', async () => {
   }
 });
 
-outletSelect.addEventListener('change', filterBranchOptionsByOutlet);
+outletSelect.addEventListener('change', () => {
+  filterBranchOptionsByOutlet();
+  venueSelection.syncBranchFromOutlet(branchSelect, outletSelect, merchantBranches);
+});
+
+branchSelect.addEventListener('change', () => {
+  venueSelection.syncOutletFromBranch(branchSelect, outletSelect, merchantBranches);
+  filterBranchOptionsByOutlet();
+});
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -176,10 +187,10 @@ form.addEventListener('submit', async (event) => {
           ? `<p><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">View official promotion terms</a></p>`
           : '';
         const originNote = item.originType
-          ? `<p>Promotion origin: ${escapeHtml(item.originType === 'outlet' ? 'Shopping Outlet' : 'Merchant')} — ${escapeHtml(item.originName || '—')} (${escapeHtml(item.eligibilityType || 'scope unspecified')})</p>`
+          ? `<p>Promotion origin: ${escapeHtml(item.originType === 'outlet' ? 'Shopping Outlet/Mall' : 'Merchant')} — ${escapeHtml(item.originName || '—')} (${escapeHtml(item.eligibilityType || 'scope unspecified')})</p>`
           : '';
         const branchNote = item.branchName ? `<p>Merchant branch: ${escapeHtml(item.branchName)}</p>` : '';
-        const outletNote = item.outletName ? `<p>Shopping Outlet: ${escapeHtml(item.outletName)}</p>` : '';
+        const outletNote = item.outletName ? `<p>Shopping Outlet/Mall: ${escapeHtml(item.outletName)}</p>` : '';
         const thresholdNote = Number(item.amountThreshold) > 0
           ? `<p>Minimum spend: NT$ ${Number(item.amountThreshold).toFixed(0)}</p>`
           : '';

@@ -147,19 +147,19 @@ export async function getRecommendations({
     if (!selectedBranchId && promotion.excludedBranchIds.length > 0) continue;
 
     if (promotion.originType === 'merchant') {
-      if (promotion.originMerchantId !== merchant.id) continue;
+      if (!promotion.originMerchantIds.includes(merchant.id)) continue;
       if (
         promotion.eligibilityType === 'selected_branches' &&
         (selectedBranchId === undefined || !promotion.eligibleBranchIds.includes(selectedBranchId))
       ) {
         continue;
       }
-    } else if (selectedOutletId !== promotion.originOutletId) {
+    } else if (selectedOutletId === undefined || !promotion.originOutletIds.includes(selectedOutletId)) {
       continue;
     }
 
     const originName = promotion.originType === 'merchant'
-      ? merchants.find(({ id }) => id === promotion.originMerchantId)?.name
+      ? merchant.name
       : selectedOutlet?.name;
     for (const paymentMethodId of promotion.paymentMethodIds) {
       const paymentMethod = paymentMethodNames.get(paymentMethodId);
@@ -188,7 +188,7 @@ export async function getRecommendations({
         eligibilityType: promotion.eligibilityType,
         branchId: selectedBranchId,
         branchName: selectedBranch?.name,
-        outletId: promotion.originType === 'outlet' ? promotion.originOutletId ?? undefined : selectedOutletId,
+        outletId: selectedOutletId,
         outletName: selectedOutlet?.name
       });
     }

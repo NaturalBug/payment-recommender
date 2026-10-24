@@ -91,8 +91,8 @@ export type ImportedPromotionDraft = {
 
 export type PromotionDraftReviewInput = {
   originType?: 'merchant' | 'outlet' | null;
-  originMerchantId?: number | null;
-  originOutletId?: number | null;
+  originMerchantIds?: number[];
+  originOutletIds?: number[];
   eligibilityType?: 'merchant_wide' | 'selected_branches' | 'outlet' | null;
   eligibleBranchIds?: number[];
   excludedMerchantIds?: number[];
@@ -133,8 +133,8 @@ export type PromotionDraftRecord = {
   validityEndReviewed: boolean;
   status: PromotionDraftStatus;
   originType?: 'merchant' | 'outlet' | null;
-  originMerchantId?: number | null;
-  originOutletId?: number | null;
+  originMerchantIds: number[];
+  originOutletIds: number[];
   eligibilityType?: 'merchant_wide' | 'selected_branches' | 'outlet' | null;
   eligibleBranchIds: number[];
   excludedMerchantIds: number[];
@@ -159,8 +159,8 @@ export type PromotionRecord = {
   id: number;
   sourceDraftId: number;
   originType: 'merchant' | 'outlet';
-  originMerchantId: number | null;
-  originOutletId: number | null;
+  originMerchantIds: number[];
+  originOutletIds: number[];
   eligibilityType: 'merchant_wide' | 'selected_branches' | 'outlet';
   benefitType: 'cashback' | 'fixed_discount';
   cashbackRate: number | null;
