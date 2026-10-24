@@ -187,7 +187,7 @@ form.addEventListener('submit', async (event) => {
           ? `<p><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">View official promotion terms</a></p>`
           : '';
         const originNote = item.originType
-          ? `<p>Promotion origin: ${escapeHtml(item.originType === 'outlet' ? 'Shopping Outlet/Mall' : 'Merchant')} — ${escapeHtml(item.originName || '—')} (${escapeHtml(item.eligibilityType || 'scope unspecified')})</p>`
+          ? `<p>Promotion origin: ${escapeHtml(item.originName || '—')}</p>`
           : '';
         const branchNote = item.branchName ? `<p>Merchant branch: ${escapeHtml(item.branchName)}</p>` : '';
         const outletNote = item.outletName ? `<p>Shopping Outlet/Mall: ${escapeHtml(item.outletName)}</p>` : '';
