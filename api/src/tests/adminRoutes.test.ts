@@ -13,6 +13,7 @@ import {
 } from '../repositories/promotionImportRepository';
 import type { ImportSource } from '../repositories/types';
 import { RepositoryConflictError } from '../repositories/errors';
+import { getRecommendations } from '../services/recommendationService';
 
 jest.setTimeout(15000);
 
@@ -23,9 +24,13 @@ describe('admin routes', () => {
     await prisma.rewardRule.deleteMany();
     await prisma.merchantBranch.deleteMany();
     await prisma.outlet.deleteMany();
+    await prisma.merchantIssuerRestriction.deleteMany();
     await prisma.merchantPaymentAcceptance.deleteMany();
+    await prisma.merchantCardExclusion.deleteMany();
     await prisma.importRun.deleteMany();
     await prisma.merchant.deleteMany();
+    await prisma.card.deleteMany();
+    await prisma.issuer.deleteMany();
     await prisma.paymentMethod.deleteMany();
     await prisma.paymentMethodType.deleteMany();
     await prisma.paymentMethodType.createMany({
@@ -372,6 +377,26 @@ describe('admin routes', () => {
     });
   });
 
+  test('persists issuer and card scopes on drafts and rejects invalid scope IDs', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const draft = await createPendingDraft();
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({ data: { name: 'Route Bank', normalizedName: 'routebank' } });
+    const card = await prisma.card.create({
+      data: { name: 'Route Card', kind: 'credit', issuerId: issuer.id, networkId: method.id }
+    });
+    const url = `/api/admin/promotion-drafts/${draft.id}`;
+
+    const saved = await request(app).patch(url).set(key).send({ issuerIds: [issuer.id], cardIds: [card.id] });
+    const duplicate = await request(app).patch(url).set(key).send({ cardIds: [card.id, card.id] });
+    const unknown = await request(app).patch(url).set(key).send({ issuerIds: [issuer.id + 999] });
+
+    expect(saved.status).toBe(200);
+    expect(saved.body.data).toMatchObject({ issuerIds: [issuer.id], cardIds: [card.id] });
+    expect(duplicate.status).toBe(400);
+    expect(unknown.status).toBe(400);
+  });
+
   test('reopens rejected drafts without losing their reason or source identity', async () => {
     const key = { 'X-Admin-API-Key': 'test-admin-key' };
     const draft = await createPendingDraft();
@@ -502,6 +527,31 @@ describe('admin routes', () => {
     });
   });
 
+  test('rejects removal of an accepted payment method with issuer restrictions', async () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({
+      data: { name: 'Restrict Bank', normalizedName: 'restrictbank' }
+    });
+    await prisma.merchantPaymentAcceptance.create({ data: { merchantId: merchant.id, paymentMethodId: method.id } });
+    await prisma.merchantIssuerRestriction.create({
+      data: { merchantId: merchant.id, networkId: method.id, issuerId: issuer.id }
+    });
+
+    const response = await request(app)
+      .delete(`/api/admin/merchants/${merchant.id}/payment-methods/${method.id}`).set(key);
+    expect(response).toMatchObject({
+      status: 409,
+      body: { success: false, message: 'acceptance has issuer restrictions' }
+    });
+    await expect(
+      prisma.merchantIssuerRestriction.count({
+        where: { merchantId: merchant.id, networkId: method.id, issuerId: issuer.id }
+      })
+    ).resolves.toBe(1);
+  });
+
   test('returns not found when removing a missing acceptance', async () => {
     const key = { 'X-Admin-API-Key': 'test-admin-key' };
     const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
@@ -549,6 +599,51 @@ describe('admin routes', () => {
     // 404 for deleted
     const deleteNotFound = await request(app).delete(`/api/admin/payment-methods/${createdId}`).set(key);
     expect(deleteNotFound.status).toBe(404);
+  });
+
+  test.each(['card', 'issuer restriction'])(
+    'rejects changing a credit network referenced by a %s to a non-credit type',
+    async (reference) => {
+      const key = { 'X-Admin-API-Key': 'test-admin-key' };
+      const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+      const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+      const issuer = await prisma.issuer.create({ data: { name: 'Bank', normalizedName: 'bank' } });
+      await prisma.merchantPaymentAcceptance.create({ data: { merchantId: merchant.id, paymentMethodId: visa.id } });
+      await prisma.rewardRule.create({
+        data: {
+          merchantId: merchant.id, paymentMethodId: visa.id, cashbackRate: 0.02, amountThreshold: 0,
+          validityStart: new Date('2026-01-01'), validityEnd: new Date('2026-12-31')
+        }
+      });
+      if (reference === 'card') {
+        const card = await prisma.card.create({
+          data: { name: 'Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+        });
+        await prisma.merchantCardExclusion.create({ data: { merchantId: merchant.id, cardId: card.id } });
+      } else {
+        await prisma.merchantIssuerRestriction.create({
+          data: { merchantId: merchant.id, networkId: visa.id, issuerId: issuer.id }
+        });
+      }
+
+      const input = { merchant_name: merchant.name, amount: 500, date: new Date('2026-08-29') };
+      expect(await getRecommendations(input)).toEqual([]);
+      const response = await request(app).patch(`/api/admin/payment-methods/${visa.id}`).set(key)
+        .send({ type: 'mobile_payment' });
+
+      expect(response.status).toBe(409);
+      expect((await prisma.paymentMethod.findUniqueOrThrow({ where: { id: visa.id } })).type).toBe('credit_card');
+      expect(await getRecommendations(input)).toEqual([]);
+    }
+  );
+
+  test('allows changing an unreferenced credit network to a non-credit type', async () => {
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const response = await request(app).patch(`/api/admin/payment-methods/${visa.id}`)
+      .set('X-Admin-API-Key', 'test-admin-key').send({ type: 'mobile_payment' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.type).toBe('mobile_payment');
   });
 
   test('maps payment method update conflicts and delete failures', async () => {
@@ -1129,5 +1224,133 @@ describe('admin routes', () => {
       .set('X-Admin-API-Key', 'test-admin-key');
 
     expect(response.status).toBe(404);
+  });
+  describe('card catalog', () => {
+    const key = { 'X-Admin-API-Key': 'test-admin-key' };
+
+    beforeEach(async () => {
+      await prisma.merchantIssuerRestriction.deleteMany();
+      await prisma.merchantCardExclusion.deleteMany();
+      await prisma.card.deleteMany();
+      await prisma.issuer.deleteMany();
+    });
+
+    test('requires the admin key for catalog and card rule endpoints', async () => {
+      const responses = await Promise.all([
+        request(app).get('/api/admin/issuers'),
+        request(app).post('/api/admin/cards').send({}),
+        request(app).put('/api/admin/merchants/1/card-rules').send({})
+      ]);
+
+      expect(responses.map((response) => response.status)).toEqual([401, 401, 401]);
+    });
+
+    test('creates, lists, and deletes issuers and cards', async () => {
+      const network = await prisma.paymentMethod.findFirstOrThrow({ where: { name: 'VISA' } });
+      const issuer = await request(app).post('/api/admin/issuers').set(key).send({ name: 'CTBC' });
+      const duplicate = await request(app).post('/api/admin/issuers').set(key).send({ name: 'ctbc' });
+      const card = await request(app)
+        .post('/api/admin/cards')
+        .set(key)
+        .send({ name: 'LINE Pay Card', kind: 'credit', issuerId: issuer.body.data.id, networkId: network.id });
+      const invalidCard = await request(app)
+        .post('/api/admin/cards')
+        .set(key)
+        .send({ name: 'Bad', kind: 'credit', issuerId: 999999, networkId: network.id });
+      const issuedConflict = await request(app).delete(`/api/admin/issuers/${issuer.body.data.id}`).set(key);
+      const cards = await request(app).get('/api/admin/cards').set(key);
+      const deletedCard = await request(app).delete(`/api/admin/cards/${card.body.data.id}`).set(key);
+      const deletedIssuer = await request(app).delete(`/api/admin/issuers/${issuer.body.data.id}`).set(key);
+      const missing = await request(app).delete('/api/admin/cards/999999').set(key);
+
+      expect(issuer.status).toBe(201);
+      expect(duplicate.status).toBe(409);
+      expect(card.status).toBe(201);
+      expect(invalidCard.status).toBe(400);
+      expect(issuedConflict.status).toBe(409);
+      expect(cards.body.data).toHaveLength(1);
+      expect(deletedCard.status).toBe(200);
+      expect(deletedIssuer.status).toBe(200);
+      expect(missing.status).toBe(404);
+      expect((await request(app).get('/api/admin/issuers').set(key)).body.data).toEqual([]);
+    });
+
+    test('saves card rules and rejects rules for unaccepted or non-card networks', async () => {
+      const merchant = await prisma.merchant.findFirstOrThrow({ where: { name: 'Starbucks' } });
+      const visa = await prisma.paymentMethod.findFirstOrThrow({ where: { name: 'VISA' } });
+      const line = await prisma.paymentMethod.findFirstOrThrow({ where: { name: 'LINE Pay' } });
+      const issuer = await request(app).post('/api/admin/issuers').set(key).send({ name: 'CTBC' });
+      const url = `/api/admin/merchants/${merchant.id}/card-rules`;
+      const issuerId = issuer.body.data.id;
+      const emptyExpected = { issuerIdsByNetwork: {}, excludedCardIds: [] };
+
+      const unaccepted = await request(app).put(url).set(key).send({
+        issuerIdsByNetwork: { [visa.id]: [issuerId] },
+        excludedCardIds: [],
+        expectedCurrentRules: emptyExpected
+      });
+      await prisma.merchantPaymentAcceptance.createMany({
+        data: [
+          { merchantId: merchant.id, paymentMethodId: visa.id },
+          { merchantId: merchant.id, paymentMethodId: line.id }
+        ]
+      });
+      const wallet = await request(app).put(url).set(key).send({
+        issuerIdsByNetwork: { [line.id]: [issuerId] },
+        excludedCardIds: [],
+        expectedCurrentRules: emptyExpected
+      });
+      const malformed = await request(app).put(url).set(key).send({ issuerIdsByNetwork: [] });
+      const saved = await request(app).put(url).set(key).send({
+        issuerIdsByNetwork: { [visa.id]: [issuerId] },
+        excludedCardIds: [],
+        expectedCurrentRules: emptyExpected
+      });
+      const loaded = await request(app).get(url).set(key);
+      const missing = await request(app).get('/api/admin/merchants/999999/card-rules').set(key);
+
+      expect(unaccepted.status).toBe(400);
+      expect(wallet.status).toBe(400);
+      expect(malformed.status).toBe(400);
+      expect(saved.status).toBe(200);
+      expect(loaded.body.data).toEqual({ issuerIdsByNetwork: { [visa.id]: [issuerId] }, excludedCardIds: [] });
+      expect(missing.status).toBe(404);
+    });
+
+    test('returns conflict when submitted card rules baseline is stale', async () => {
+      const merchant = await prisma.merchant.findFirstOrThrow({ where: { name: 'Starbucks' } });
+      const visa = await prisma.paymentMethod.findFirstOrThrow({ where: { name: 'VISA' } });
+      await prisma.merchantPaymentAcceptance.create({
+        data: { merchantId: merchant.id, paymentMethodId: visa.id }
+      });
+      const staleIssuer = await request(app).post('/api/admin/issuers').set(key).send({ name: 'Stale Bank' });
+      const latestIssuer = await request(app).post('/api/admin/issuers').set(key).send({ name: 'Latest Bank' });
+      const url = `/api/admin/merchants/${merchant.id}/card-rules`;
+      const staleRuleSet = {
+        issuerIdsByNetwork: { [visa.id]: [staleIssuer.body.data.id] },
+        excludedCardIds: []
+      };
+
+      const loaded = await request(app).get(url).set(key);
+      await request(app).put(url).set(key).send({
+        issuerIdsByNetwork: { [visa.id]: [latestIssuer.body.data.id] },
+        excludedCardIds: [],
+        expectedCurrentRules: loaded.body.data
+      });
+      const staleSave = await request(app).put(url).set(key).send({
+        ...staleRuleSet,
+        expectedCurrentRules: loaded.body.data
+      });
+      const current = await request(app).get(url).set(key);
+
+      expect(staleSave).toMatchObject({
+        status: 409,
+        body: { success: false, message: 'card rules changed; reload and retry' }
+      });
+      expect(current.body.data).toEqual({
+        issuerIdsByNetwork: { [visa.id]: [latestIssuer.body.data.id] },
+        excludedCardIds: []
+      });
+    });
   });
 });
