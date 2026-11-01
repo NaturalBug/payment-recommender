@@ -63,7 +63,15 @@ export async function updatePaymentMethod(
 
   try {
     return await prisma.paymentMethod.update({
-      where: { id },
+      where: {
+        id,
+        ...(input.type !== 'credit_card' && {
+          OR: [
+            { type: { not: 'credit_card' } },
+            { cards: { none: {} }, issuerRestrictions: { none: {} } }
+          ]
+        })
+      },
       data: {
         name: trimmedName,
         normalizedName: normalizePaymentMethodKey(trimmedName),
@@ -78,6 +86,9 @@ export async function updatePaymentMethod(
       }
 
       if (error.code === 'P2025') {
+        if (input.type !== 'credit_card' && await prisma.paymentMethod.findUnique({ where: { id } })) {
+          throw new RepositoryConflictError('credit-card payment method has dependent cards or issuer restrictions');
+        }
         return null;
       }
     }
