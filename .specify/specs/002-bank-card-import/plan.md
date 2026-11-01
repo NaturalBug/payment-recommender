@@ -11,6 +11,19 @@
 | Far Eastern (FEIB) | Page is a script-rendered shell; card data is loaded by JavaScript from endpoints that are not documented. | A plain fetch yields no cards. Needs a decision (below); not scraped via undocumented endpoints without approval. |
 | Cathay / CTBC / E.SUN (proposed) | Cathay and CTBC are script-rendered shells; E.SUN's guessed URL returned 404 (right URL not yet found). | Not first-release candidates; revisit per bank. |
 
+### Additional probe (2026-11-01): banks readable without scripts
+
+| Bank | Card list | Detail page | Network in text |
+|------|-----------|-------------|-----------------|
+| E.SUN | `/zh-tw/personal/credit-card/intro` (~48 detail links) | `.../intro/<group>/<slug>` with `<h1>` name | Not on sampled page; reviewer sets it |
+| Fubon | `/banking/personal/credit_card/all_card/all_card.htm` | `.../all_card/<slug>/<slug>.htm` with `<h1>` | Visa/Mastercard in text |
+| SinoPac | `/sinopacBT/personal/credit-card/introduction/list.html` | `.../introduction/<group>/<slug>.html` | Visa/Mastercard/JCB in text |
+| Standard Chartered | `/tw/credit-cards/` | `/tw/credit-cards/<slug>/` (name in `<title>`) | VISA in text |
+| DBS | `/personal-zh/cards/dbs-credit-cards/default.page` | `.../dbs-credit-cards/<slug>` | Mastercard in text |
+| Taiwan Cooperative | overview page lists cards inline | same page | Visa/JCB/Mastercard in text |
+
+Not readable: First Bank (WAF), Far Eastern/Cathay/CTBC (script shells), Yuanta (HTTP 500), Hua Nan (no card list links). `robots.txt` of the probed hosts does not disallow the card pages.
+
 ## Proposed approach
 
 1. **Adapter model**: a `BankSourceAdapter` (per bank: issuer name, allowed hosts/paths, `listCards()`, `listPromotions()`) mirroring the existing `PromotionSourceAdapter`, so runs, fingerprints, and failures reuse `ImportRun`.
