@@ -7,6 +7,7 @@ import {
   getMerchantCardRules,
   listCards,
   listIssuers,
+  listRecommendationCards,
   replaceMerchantCardRules
 } from '../repositories/cardRepository';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -57,17 +58,18 @@ describe('card schema', () => {
     const network = await createNetwork();
     const issuer = await createTestIssuer();
     const card = await prisma.card.create({
-      data: { issuerId: issuer.id, networkId: network.id, name: 'Example Platinum', kind: 'credit' }
+      data: { issuerId: issuer.id, networks: { create: [{ networkId: network.id }] }, name: 'Example Platinum', kind: 'credit' },
+      include: { networks: true }
     });
 
-    expect(card).toMatchObject({ issuerId: issuer.id, networkId: network.id, kind: 'credit' });
+    expect(card).toMatchObject({ issuerId: issuer.id, kind: 'credit', networks: [{ networkId: network.id }] });
   });
 
   test('persists merchant restrictions and promotion issuer/card scopes', async () => {
     const network = await createNetwork();
     const issuer = await createTestIssuer();
     const card = await prisma.card.create({
-      data: { issuerId: issuer.id, networkId: network.id, name: 'Example Debit', kind: 'debit' }
+      data: { issuerId: issuer.id, networks: { create: [{ networkId: network.id }] }, name: 'Example Debit', kind: 'debit' }
     });
     const merchant = await prisma.merchant.create({
       data: { name: 'Cafe', normalizedName: 'cafe' }
@@ -169,12 +171,12 @@ describe('card schema', () => {
       name: 'Example Platinum',
       kind: 'credit',
       issuerId: issuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
 
     await expect(listIssuers()).resolves.toMatchObject([{ id: issuer.id, name: 'Example Bank' }]);
     await expect(listCards()).resolves.toMatchObject([
-      { id: card.id, name: 'Example Platinum', issuerId: issuer.id, networkId: network.id }
+      { id: card.id, name: 'Example Platinum', issuerId: issuer.id, networkIds: [network.id] }
     ]);
   });
 
@@ -183,13 +185,34 @@ describe('card schema', () => {
     const network = await createNetwork();
 
     await expect(
-      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkId: network.id })
+      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkIds: [network.id] })
     ).resolves.toMatchObject({
       name: 'Example Platinum',
       kind: 'credit',
       issuerId: issuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
+  });
+
+  test('creates a card with several networks and rejects empty, duplicate, or non-credit-card sets', async () => {
+    const issuer = await createIssuer('Example Bank');
+    const visa = await createNetwork('Multi Visa');
+    const jcb = await createNetwork('Multi JCB');
+
+    await expect(
+      createCard({ name: 'Dual', kind: 'credit', issuerId: issuer.id, networkIds: [jcb.id, visa.id] })
+    ).resolves.toMatchObject({ networkIds: [visa.id, jcb.id] });
+    await expect(listCards()).resolves.toMatchObject([{ name: 'Dual', networkIds: [visa.id, jcb.id] }]);
+    await expect(listRecommendationCards()).resolves.toMatchObject([
+      { name: 'Dual', issuerName: 'Example Bank', networkIds: [visa.id, jcb.id] }
+    ]);
+
+    for (const networkIds of [[], [visa.id, visa.id]]) {
+      await expect(
+        createCard({ name: 'Bad', kind: 'credit', issuerId: issuer.id, networkIds })
+      ).rejects.toBeInstanceOf(RepositoryValidationError);
+    }
+    await expect(prisma.card.count({ where: { name: 'Bad' } })).resolves.toBe(0);
   });
 
   test('prevents creating a card when a concurrent network downgrade commits first', async () => {
@@ -221,7 +244,7 @@ describe('card schema', () => {
       name: 'Race Card',
       kind: 'credit',
       issuerId: issuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
 
     releaseLock();
@@ -232,7 +255,7 @@ describe('card schema', () => {
       select: { type: true }
     });
     const cardCount = await prisma.card.count({
-      where: { issuerId: issuer.id, networkId: network.id, name: 'Race Card' }
+      where: { issuerId: issuer.id, networks: { some: { networkId: network.id } }, name: 'Race Card' }
     });
 
     if (downgradeResult.status === 'fulfilled' && downgradeResult.value) {
@@ -260,7 +283,7 @@ describe('card schema', () => {
     const network = await createNetwork();
 
     await expect(
-      createCard({ name: 'Example Platinum', kind: 'charge', issuerId: issuer.id, networkId: network.id })
+      createCard({ name: 'Example Platinum', kind: 'charge', issuerId: issuer.id, networkIds: [network.id] })
     ).rejects.toBeInstanceOf(RepositoryValidationError);
   });
 
@@ -268,7 +291,7 @@ describe('card schema', () => {
     const network = await createNetwork();
 
     await expect(
-      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: 9999, networkId: network.id })
+      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: 9999, networkIds: [network.id] })
     ).rejects.toBeInstanceOf(RepositoryValidationError);
   });
 
@@ -279,10 +302,10 @@ describe('card schema', () => {
     });
 
     await expect(
-      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkId: 9999 })
+      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkIds: [9999] })
     ).rejects.toBeInstanceOf(RepositoryValidationError);
     await expect(
-      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkId: wallet.id })
+      createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkIds: [wallet.id] })
     ).rejects.toBeInstanceOf(RepositoryValidationError);
   });
 
@@ -293,7 +316,7 @@ describe('card schema', () => {
       name: 'Example Platinum',
       kind: 'credit',
       issuerId: issuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
 
     await expect(deleteCard(card.id)).resolves.toBe(true);
@@ -305,7 +328,7 @@ describe('card schema', () => {
   test('rejects deleting an issuer that still has catalog cards', async () => {
     const issuer = await createIssuer('Example Bank');
     const network = await createNetwork();
-    await createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkId: network.id });
+    await createCard({ name: 'Example Platinum', kind: 'credit', issuerId: issuer.id, networkIds: [network.id] });
 
     await expect(deleteIssuer(issuer.id)).rejects.toBeInstanceOf(RepositoryConflictError);
   });
@@ -343,7 +366,7 @@ describe('card schema', () => {
       name: 'Example Platinum',
       kind: 'credit',
       issuerId: issuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
     const merchant = await prisma.merchant.create({
       data: { name: 'Cafe', normalizedName: 'cafe' }
@@ -371,13 +394,13 @@ describe('card schema', () => {
       name: 'Snapshot Card A',
       kind: 'credit',
       issuerId: oldIssuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
     const newCard = await createCard({
       name: 'Snapshot Card B',
       kind: 'credit',
       issuerId: newIssuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
     const merchant = await prisma.merchant.create({
       data: { name: 'Snapshot Cafe', normalizedName: 'snapshotcafe' }
@@ -432,13 +455,13 @@ describe('card schema', () => {
       name: 'Expected Card A',
       kind: 'credit',
       issuerId: oldIssuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
     const currentCard = await createCard({
       name: 'Expected Card B',
       kind: 'credit',
       issuerId: currentIssuer.id,
-      networkId: network.id
+      networkIds: [network.id]
     });
     const merchant = await prisma.merchant.create({
       data: { name: 'Expected Cafe', normalizedName: 'expectedcafe' }

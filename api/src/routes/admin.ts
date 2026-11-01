@@ -697,19 +697,26 @@ router.get('/cards', async (_req, res) => {
 });
 
 router.post('/cards', async (req, res) => {
-  const { name, kind, issuerId, networkId } = req.body ?? {};
+  const { name, kind, issuerId, networkIds } = req.body ?? {};
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ success: false, message: 'name is required' });
   }
   if (typeof kind !== 'string' || !kind.trim()) {
     return res.status(400).json({ success: false, message: 'kind is required' });
   }
-  if (!Number.isInteger(issuerId) || issuerId <= 0 || !Number.isInteger(networkId) || networkId <= 0) {
-    return res.status(400).json({ success: false, message: 'issuerId and networkId must be positive integers' });
+  if (!Number.isInteger(issuerId) || issuerId <= 0) {
+    return res.status(400).json({ success: false, message: 'issuerId must be a positive integer' });
+  }
+  if (
+    !Array.isArray(networkIds) ||
+    networkIds.length === 0 ||
+    !networkIds.every((id) => Number.isInteger(id) && id > 0)
+  ) {
+    return res.status(400).json({ success: false, message: 'networkIds must be a non-empty array of positive integers' });
   }
 
   try {
-    return res.status(201).json({ success: true, data: await createCard({ name, kind, issuerId, networkId }) });
+    return res.status(201).json({ success: true, data: await createCard({ name, kind, issuerId, networkIds }) });
   } catch (error) {
     return sendCatalogError(res, error, 'unable to create card');
   }

@@ -105,31 +105,35 @@ export async function getRecommendations({
   ]);
   const acceptedPaymentMethodIdSet = new Set(acceptedPaymentMethodIds);
   const paymentMethodsById = new Map(paymentMethods.map((paymentMethod) => [paymentMethod.id, paymentMethod]));
-  const cardsByNetworkId = new Map<number, typeof cards>();
-  const eligibleCardsByNetworkId = new Map<number, typeof cards>();
+  type NetworkCard = (typeof cards)[number] & { networkId: number; networkName: string };
+  const cardsByNetworkId = new Map<number, NetworkCard[]>();
+  const eligibleCardsByNetworkId = new Map<number, NetworkCard[]>();
   const excludedCardIds = new Set(merchantCardRules.excludedCardIds);
   for (const card of cards) {
-    if (!acceptedPaymentMethodIdSet.has(card.networkId)) continue;
-    const network = paymentMethodsById.get(card.networkId);
-    if (network?.type !== 'credit_card') continue;
+    for (const networkId of card.networkIds) {
+      if (!acceptedPaymentMethodIdSet.has(networkId)) continue;
+      const network = paymentMethodsById.get(networkId);
+      if (network?.type !== 'credit_card') continue;
 
-    const networkCards = cardsByNetworkId.get(card.networkId) ?? [];
-    networkCards.push(card);
-    cardsByNetworkId.set(card.networkId, networkCards);
-    const allowedIssuerIds = merchantCardRules.issuerIdsByNetwork[card.networkId];
-    if (
-      excludedCardIds.has(card.id) ||
-      (allowedIssuerIds?.length && !allowedIssuerIds.includes(card.issuerId))
-    ) {
-      continue;
+      const networkCard = { ...card, networkId, networkName: network.name };
+      const networkCards = cardsByNetworkId.get(networkId) ?? [];
+      networkCards.push(networkCard);
+      cardsByNetworkId.set(networkId, networkCards);
+      const allowedIssuerIds = merchantCardRules.issuerIdsByNetwork[networkId];
+      if (
+        excludedCardIds.has(card.id) ||
+        (allowedIssuerIds?.length && !allowedIssuerIds.includes(card.issuerId))
+      ) {
+        continue;
+      }
+      const eligibleNetworkCards = eligibleCardsByNetworkId.get(networkId) ?? [];
+      eligibleNetworkCards.push(networkCard);
+      eligibleCardsByNetworkId.set(networkId, eligibleNetworkCards);
     }
-    const eligibleNetworkCards = eligibleCardsByNetworkId.get(card.networkId) ?? [];
-    eligibleNetworkCards.push(card);
-    eligibleCardsByNetworkId.set(card.networkId, eligibleNetworkCards);
   }
   const recommendationCardsByPaymentMethodId = new Map<
     number,
-    Array<(typeof cards)[number] | undefined>
+    Array<NetworkCard | undefined>
   >();
   for (const paymentMethodId of acceptedPaymentMethodIds) {
     const paymentMethod = paymentMethodsById.get(paymentMethodId);
@@ -149,12 +153,12 @@ export async function getRecommendations({
   }
   const cardsForPaymentMethod = (paymentMethodId: number) =>
     recommendationCardsByPaymentMethodId.get(paymentMethodId) ?? [];
-  const cardRecommendationFields = (card: (typeof cards)[number] | undefined) => card ? {
+  const cardRecommendationFields = (card: NetworkCard | undefined) => card ? {
     cardId: card.id,
     issuerName: card.issuerName,
     networkName: card.networkName
   } : {};
-  const cardPaymentMethodName = (fallbackName: string, card: (typeof cards)[number] | undefined) =>
+  const cardPaymentMethodName = (fallbackName: string, card: NetworkCard | undefined) =>
     card ? `${card.issuerName} ${card.name} (${card.networkName})` : fallbackName;
   const selectedBranchId = selectedBranch?.id;
   const selectedOutletId = selectedOutlet?.id;

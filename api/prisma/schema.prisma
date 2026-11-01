@@ -73,7 +73,7 @@ model PaymentMethod {
   draftSelections    PromotionDraftPaymentMethod[]
   promotions         PromotionPaymentMethod[]
   rewardRules        RewardRule[]
-  cards              Card[]
+  cardNetworks       CardNetwork[]
   issuerRestrictions MerchantIssuerRestriction[]
 }
 
@@ -352,14 +352,22 @@ model Card {
 
   issuer    Issuer        @relation(fields: [issuerId], references: [id], onDelete: Restrict)
   issuerId  Int
-  network   PaymentMethod @relation(fields: [networkId], references: [id], onDelete: Restrict)
-  networkId Int
 
+  networks           CardNetwork[]
   merchantExclusions MerchantCardExclusion[]
   draftScopes        PromotionDraftCard[]
   promotionScopes    PromotionCard[]
 
   @@unique([issuerId, name])
+}
+
+model CardNetwork {
+  card      Card          @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId    Int
+  network   PaymentMethod @relation(fields: [networkId], references: [id], onDelete: Restrict)
+  networkId Int
+
+  @@id([cardId, networkId])
 }
 
 model MerchantIssuerRestriction {
