@@ -42,19 +42,25 @@ The API uses Prisma with SQLite for local development. Create the local environm
 cd api
 cp .env.example .env
 npx prisma generate
-npx prisma db push
+npm run db:push
 npm run db:seed
 ```
 
 Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep
 the database file in `api/prisma/` and do not commit it; it is already ignored
-by git. Back up local SQLite data before applying schema updates, then update
-the schema in place:
+by git. `npm run db:push` first backfills `PaymentMethod.normalizedName` for
+older databases, then applies the current schema. It is safe to run on a new
+empty database as well. Back up local SQLite data before applying schema
+updates. If you invoke Prisma directly, run the backfill first:
 
 ```bash
+npm run db:backfill-payment-method-names
 npx prisma db push
 npm run db:seed
 ```
+
+The backfill preserves existing payment methods and stops with an error if
+their names normalize to duplicates; it does not reset or delete database data.
 
 Set `ADMIN_API_KEY` in `api/.env` before using the Admin Catalog page. The key
 must be sent in the `X-Admin-API-Key` header for every `/api/admin/*` request.
