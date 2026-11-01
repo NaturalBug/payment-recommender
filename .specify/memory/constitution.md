@@ -1,11 +1,3 @@
-<!--
-Sync Impact Report
-Version change: unversioned scaffold -> 1.0.0
-Modified principles: None; the scaffold placeholders were replaced with five initial principles.
-Added sections: Engineering Constraints; Delivery Workflow.
-Removed sections: None.
-Follow-up TODOs: TODO(RATIFICATION_DATE): Original adoption date is unknown.
--->
 # Payment Recommendation MVP Constitution
 
 ## Core Principles
@@ -26,12 +18,15 @@ that passes it, then refactoring while tests remain green. API tests MUST use th
 database and MUST NOT depend on local development data. This prevents regressions in business
 rules and persistence.
 
-### IV. Superpowers Delivery Sequence
-Implementation of any task list MUST follow this sequence: isolated worktree, test-driven
-development using red-green-refactor, subagent-driven execution where tasks are independent, code
-review, then the finish-branch workflow. A later stage MUST NOT be skipped; a stage that does not
-apply MUST be explicitly documented in the task or review record. This makes delivery repeatable
-and independently verified.
+### IV. Scaled Spec Kit and Superpowers Delivery
+Changes estimated below 30 minutes and touching fewer than three files MAY proceed directly.
+Single-concern work estimated at 30 minutes to two hours MUST use the applicable Superpowers
+workflow. Multi-component, user-facing, audited, or longer work MUST use Spec Kit to produce
+reviewed specifications, plans, and tasks, then use Superpowers for worktree isolation,
+red-green-refactor, independent subagent execution, code review, and branch completion. Once a
+reviewed `.specify/specs/<feature-id>/tasks.md` exists, it is the execution contract and MUST NOT
+be re-planned. Spec Kit's `/speckit-implement` MUST NOT be combined with Superpowers for the same
+feature. This applies rigor in proportion to risk while preserving a single source of execution.
 
 ### V. Secure, Explicit Operations
 Administrative endpoints MUST require authentication and preserve their authorization behavior.
@@ -49,12 +44,13 @@ display names for selected entities.
 
 ## Delivery Workflow
 
-Every implementation task MUST identify its affected API, persistence, and UI boundaries before
-editing. Work MUST be performed in an isolated worktree before code changes begin. Tests MUST be
-written and observed failing before the implementation is introduced; targeted tests, API build,
-and JavaScript syntax checks MUST pass before review. Independent work items MAY use subagents,
-but their outputs MUST be integrated and reviewed by the primary implementer. Code review MUST
-precede the finish-branch workflow and review findings MUST be addressed or explicitly accepted.
+For work requiring the full process, Spec Kit owns constitution, specification, planning, and task
+generation; Superpowers owns implementation, review, and branch completion. Implementation tasks
+MUST identify affected API, persistence, and UI boundaries before editing. Tests MUST be written
+and observed failing before behavior changes are implemented; targeted tests, API build, and
+JavaScript syntax checks MUST pass before review. Independent work items MAY use subagents, but
+their outputs MUST be integrated and reviewed by the primary implementer. Code review MUST
+precede branch completion and findings MUST be addressed or explicitly accepted.
 
 ## Governance
 
@@ -65,5 +61,5 @@ for new or materially expanded governance, and PATCH for clarifications. Each im
 task list, pull request, and code review MUST verify compliance with the applicable principles.
 Exceptions require a written rationale, scope, and expiration in the relevant task or pull request.
 
-**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE): Original adoption date is unknown |
+**Version**: 1.1.0 | **Ratified**: 2026-11-01 |
 **Last Amended**: 2026-11-01

@@ -26,6 +26,19 @@ Use TypeScript for API changes and follow the existing style: two-space indentat
 
 Write Jest tests beside the API test suite as `api/src/tests/<feature>.test.ts`. Name tests as behavior statements, for example `test('returns empty array for unknown merchant', ...)`. Tests use an isolated SQLite database (`api/prisma/test.db`) configured by `testSetup`; never depend on `dev.db`. Run `npm run test:api` before opening a PR, and run `node --check web/app.js && node --check web/admin.js` after frontend edits.
 
+## Spec Kit and Superpowers Workflow
+
+Select the process by scope. Changes estimated below 30 minutes and touching fewer than three files
+may proceed directly. For single-concern work estimated at 30 minutes to two hours, use
+Superpowers. For multi-component, user-facing, audited, or longer work, use Spec Kit to create
+and review the specification, plan, and tasks, then use Superpowers to execute them.
+
+Spec Kit owns the what: `/speckit-constitution`, `/speckit-specify`,
+`/speckit-clarify`, `/speckit-plan`, and `/speckit-tasks`. Superpowers owns the how: worktrees,
+TDD, independent subagent execution, code review, and branch completion. Once a reviewed
+`.specify/specs/<feature-id>/tasks.md` exists, execute it as the contract and do not re-plan it.
+Do not use `/speckit-implement` and Superpowers to execute the same feature.
+
 ## Commit & Pull Request Guidelines
 
 Follow the established Conventional Commit pattern: `feat(api): protect admin endpoints`, `fix(web): improve admin catalog form layout`, or `chore(deps): update dependencies`. Keep commits focused. PRs should describe the user-visible change, link the relevant issue when available, list verification commands, and include screenshots for UI changes. Do not commit `.env`, API keys, or Prisma database files.
