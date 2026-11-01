@@ -1,11 +1,37 @@
 import prisma from '../lib/prisma';
 import { createImportRun } from '../repositories/promotionImportRepository';
-import { getRecommendations } from '../services/recommendationService';
+import { getRecommendations, Recommendation } from '../services/recommendationService';
+
+type ExpectedCardRecommendation = Recommendation & {
+  cardId?: number;
+  issuerName?: string;
+  networkName?: string;
+};
 
 describe('getRecommendations', () => {
   beforeEach(async () => {
+    await prisma.promotionOriginMerchant.deleteMany();
+    await prisma.promotionOriginOutlet.deleteMany();
+    await prisma.promotionPaymentMethod.deleteMany();
+    await prisma.promotionEligibleBranch.deleteMany();
+    await prisma.promotionExcludedMerchant.deleteMany();
+    await prisma.promotionExcludedBranch.deleteMany();
+    await prisma.promotionIssuer.deleteMany();
+    await prisma.promotionCard.deleteMany();
     await prisma.promotion.deleteMany();
+    await prisma.promotionDraftOriginMerchant.deleteMany();
+    await prisma.promotionDraftOriginOutlet.deleteMany();
+    await prisma.promotionDraftPaymentMethod.deleteMany();
+    await prisma.promotionDraftEligibleBranch.deleteMany();
+    await prisma.promotionDraftExcludedMerchant.deleteMany();
+    await prisma.promotionDraftExcludedBranch.deleteMany();
+    await prisma.promotionDraftIssuer.deleteMany();
+    await prisma.promotionDraftCard.deleteMany();
     await prisma.promotionDraft.deleteMany();
+    await prisma.merchantCardExclusion.deleteMany();
+    await prisma.merchantIssuerRestriction.deleteMany();
+    await prisma.card.deleteMany();
+    await prisma.issuer.deleteMany();
     await prisma.rewardRule.deleteMany();
     await prisma.merchantBranch.deleteMany();
     await prisma.outlet.deleteMany();
@@ -147,6 +173,8 @@ describe('getRecommendations', () => {
     eligibleBranchIds?: number[];
     excludedMerchantIds?: number[];
     excludedBranchIds?: number[];
+    issuerIds?: number[];
+    cardIds?: number[];
     sourceUrl: string;
   }) {
     const run = await createImportRun('ipass-money');
@@ -197,6 +225,12 @@ describe('getRecommendations', () => {
           create: (input.excludedBranchIds ?? []).map((branchId) => ({
             branch: { connect: { id: branchId } }
           }))
+        },
+        issuers: {
+          create: (input.issuerIds ?? []).map((issuerId) => ({ issuer: { connect: { id: issuerId } } }))
+        },
+        cards: {
+          create: (input.cardIds ?? []).map((cardId) => ({ card: { connect: { id: cardId } } }))
         }
       }
     });
@@ -259,6 +293,212 @@ describe('getRecommendations', () => {
     });
 
     expect(results.map((result) => result.paymentMethod)).toEqual(['LINE Pay', 'VISA']);
+  });
+
+  test('limits accepted network recommendations to the merchant allowed issuer', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const allowedIssuer = await prisma.issuer.create({
+      data: { name: 'Allowed Bank', normalizedName: 'allowedbank' }
+    });
+    const otherIssuer = await prisma.issuer.create({
+      data: { name: 'Other Bank', normalizedName: 'otherbank' }
+    });
+    const allowedCard = await prisma.card.create({
+      data: { name: 'Everyday Card', kind: 'credit', issuerId: allowedIssuer.id, networkId: visa.id }
+    });
+    await prisma.card.create({
+      data: { name: 'Travel Card', kind: 'credit', issuerId: otherIssuer.id, networkId: visa.id }
+    });
+    await prisma.merchantIssuerRestriction.create({
+      data: { merchantId: merchant.id, networkId: visa.id, issuerId: allowedIssuer.id }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results
+      .filter((result) => (result as ExpectedCardRecommendation).networkName === 'VISA')
+      .map((result) => (result as ExpectedCardRecommendation).cardId))
+      .toEqual([allowedCard.id]);
+  });
+
+  test('omits an excluded card without excluding other cards on its network', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({
+      data: { name: 'Example Bank', normalizedName: 'examplebank' }
+    });
+    const excludedCard = await prisma.card.create({
+      data: { name: 'Excluded Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+    });
+    const eligibleCard = await prisma.card.create({
+      data: { name: 'Eligible Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+    });
+    await prisma.merchantCardExclusion.create({
+      data: { merchantId: merchant.id, cardId: excludedCard.id }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results
+      .filter((result) => (result as ExpectedCardRecommendation).networkName === 'VISA')
+      .map((result) => (result as ExpectedCardRecommendation).cardId))
+      .toEqual([eligibleCard.id]);
+  });
+
+  test('returns issuer, network, card identity, and a named payment method for catalog cards', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({
+      data: { name: 'Example Bank', normalizedName: 'examplebank' }
+    });
+    const card = await prisma.card.create({
+      data: { name: 'Everyday Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results).toContainEqual(expect.objectContaining({
+      paymentMethod: 'Example Bank Everyday Card (VISA)',
+      cardId: card.id,
+      issuerName: issuer.name,
+      networkName: visa.name
+    }));
+  });
+
+  test('keeps network-only rewards when no catalog cards exist for the network', async () => {
+    const results = await getRecommendations({
+      merchant_name: 'Starbucks',
+      amount: 500,
+      date: new Date('2026-08-15')
+    });
+
+    expect(results).toContainEqual(expect.objectContaining({
+      paymentMethod: 'AMEX Gold',
+      cashbackRate: 0.04
+    }));
+    expect(results.find((result) => result.paymentMethod === 'AMEX Gold')).not.toHaveProperty('cardId');
+  });
+
+  test('omits a network-only reward when an issuer allowlist exists but no cards are cataloged', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({ data: { name: 'Allowed Bank', normalizedName: 'allowedbank' } });
+    await prisma.merchantIssuerRestriction.create({
+      data: { merchantId: merchant.id, networkId: visa.id, issuerId: issuer.id }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results.map((result) => result.paymentMethod)).toEqual(['LINE Pay']);
+  });
+
+  test('keeps non-card payment method recommendations unchanged when cards exist', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({
+      data: { name: 'Example Bank', normalizedName: 'examplebank' }
+    });
+    await prisma.card.create({
+      data: { name: 'Everyday Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+    });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-08-29')
+    });
+
+    expect(results).toContainEqual(expect.objectContaining({
+      paymentMethod: 'LINE Pay',
+      benefitType: 'cashback',
+      cashbackRate: 0.03
+    }));
+    expect(results.find((result) => result.paymentMethod === 'LINE Pay')).not.toHaveProperty('cardId');
+  });
+
+  test('limits network promotions to scoped issuers and cards, and keeps legacy promotions network-wide', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuerA = await prisma.issuer.create({ data: { name: 'Bank A', normalizedName: 'banka' } });
+    const issuerB = await prisma.issuer.create({ data: { name: 'Bank B', normalizedName: 'bankb' } });
+    const cardA1 = await prisma.card.create({
+      data: { name: 'A One', kind: 'credit', issuerId: issuerA.id, networkId: visa.id }
+    });
+    const cardA2 = await prisma.card.create({
+      data: { name: 'A Two', kind: 'credit', issuerId: issuerA.id, networkId: visa.id }
+    });
+    const cardB = await prisma.card.create({
+      data: { name: 'B One', kind: 'credit', issuerId: issuerB.id, networkId: visa.id }
+    });
+    const base = {
+      originType: 'merchant' as const,
+      originMerchantIds: [merchant.id],
+      eligibilityType: 'merchant_wide' as const,
+      paymentMethodId: visa.id
+    };
+    const issuerPromotion = await createPromotion({ ...base, issuerIds: [issuerA.id], sourceUrl: 'https://official.example/issuer' });
+    const cardPromotion = await createPromotion({ ...base, cardIds: [cardB.id], sourceUrl: 'https://official.example/card' });
+    const bothPromotion = await createPromotion({
+      ...base,
+      issuerIds: [issuerA.id],
+      cardIds: [cardB.id],
+      sourceUrl: 'https://official.example/both'
+    });
+    const legacyPromotion = await createPromotion({ ...base, sourceUrl: 'https://official.example/legacy' });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-10-01')
+    }) as ExpectedCardRecommendation[];
+    const cardIdsFor = (promotionId: number) => results
+      .filter((item) => item.promotionId === promotionId)
+      .map((item) => item.cardId)
+      .sort();
+
+    expect(cardIdsFor(issuerPromotion.id)).toEqual([cardA1.id, cardA2.id].sort());
+    expect(cardIdsFor(cardPromotion.id)).toEqual([cardB.id]);
+    expect(cardIdsFor(bothPromotion.id)).toEqual([]);
+    expect(cardIdsFor(legacyPromotion.id)).toEqual([cardA1.id, cardA2.id, cardB.id].sort());
+  });
+
+  test('does not give scoped promotions to generic network-only candidates', async () => {
+    const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+    const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+    const issuer = await prisma.issuer.create({ data: { name: 'Bank A', normalizedName: 'banka' } });
+    const promotion = await createPromotion({
+      originType: 'merchant',
+      originMerchantIds: [merchant.id],
+      eligibilityType: 'merchant_wide',
+      paymentMethodId: visa.id,
+      issuerIds: [issuer.id],
+      sourceUrl: 'https://official.example/no-cards'
+    });
+
+    const results = await getRecommendations({
+      merchant_name: merchant.name,
+      amount: 500,
+      date: new Date('2026-10-01')
+    });
+
+    expect(results.map((item) => item.promotionId)).not.toContain(promotion.id);
   });
 
   test('applies one promotion to every Outlet listed as an origin', async () => {

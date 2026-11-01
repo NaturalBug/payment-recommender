@@ -1,4 +1,5 @@
 import { normalizeMerchantName } from '../lib/normalization';
+import { getMerchantCardRules, listRecommendationCards } from '../repositories/cardRepository';
 import { RepositoryNotFoundError, RepositoryValidationError } from '../repositories/errors';
 import { findMerchantBranchById } from '../repositories/merchantBranchRepository';
 import { listAcceptedPaymentMethodIds, listMerchants } from '../repositories/merchantRepository';
@@ -26,6 +27,9 @@ export type Recommendation = {
   branchId?: number;
   branchName?: string;
   outletId?: number;
+  cardId?: number;
+  issuerName?: string;
+  networkName?: string;
 };
 
 export type GetRecommendationsInput = {
@@ -91,19 +95,73 @@ export async function getRecommendations({
     throw new RepositoryValidationError('branch does not belong to the selected outlet');
   }
 
-  const [rewardRules, acceptedPaymentMethodIds, promotions, paymentMethods] = await Promise.all([
+  const [rewardRules, acceptedPaymentMethodIds, promotions, paymentMethods, cards, merchantCardRules] = await Promise.all([
     listRewardRules(),
     listAcceptedPaymentMethodIds(merchant.id),
     listPromotions(),
-    listPaymentMethods()
+    listPaymentMethods(),
+    listRecommendationCards(),
+    getMerchantCardRules(merchant.id)
   ]);
   const acceptedPaymentMethodIdSet = new Set(acceptedPaymentMethodIds);
-  const paymentMethodNames = new Map(paymentMethods.map(({ id, name }) => [id, name]));
+  const paymentMethodsById = new Map(paymentMethods.map((paymentMethod) => [paymentMethod.id, paymentMethod]));
+  const cardsByNetworkId = new Map<number, typeof cards>();
+  const eligibleCardsByNetworkId = new Map<number, typeof cards>();
+  const excludedCardIds = new Set(merchantCardRules.excludedCardIds);
+  for (const card of cards) {
+    if (!acceptedPaymentMethodIdSet.has(card.networkId)) continue;
+    const network = paymentMethodsById.get(card.networkId);
+    if (network?.type !== 'credit_card') continue;
+
+    const networkCards = cardsByNetworkId.get(card.networkId) ?? [];
+    networkCards.push(card);
+    cardsByNetworkId.set(card.networkId, networkCards);
+    const allowedIssuerIds = merchantCardRules.issuerIdsByNetwork[card.networkId];
+    if (
+      excludedCardIds.has(card.id) ||
+      (allowedIssuerIds?.length && !allowedIssuerIds.includes(card.issuerId))
+    ) {
+      continue;
+    }
+    const eligibleNetworkCards = eligibleCardsByNetworkId.get(card.networkId) ?? [];
+    eligibleNetworkCards.push(card);
+    eligibleCardsByNetworkId.set(card.networkId, eligibleNetworkCards);
+  }
+  const recommendationCardsByPaymentMethodId = new Map<
+    number,
+    Array<(typeof cards)[number] | undefined>
+  >();
+  for (const paymentMethodId of acceptedPaymentMethodIds) {
+    const paymentMethod = paymentMethodsById.get(paymentMethodId);
+    if (
+      paymentMethod?.type !== 'credit_card' ||
+      (!cardsByNetworkId.has(paymentMethodId) &&
+        !merchantCardRules.issuerIdsByNetwork[paymentMethodId]?.length)
+    ) {
+      recommendationCardsByPaymentMethodId.set(paymentMethodId, [undefined]);
+      continue;
+    }
+
+    recommendationCardsByPaymentMethodId.set(
+      paymentMethodId,
+      eligibleCardsByNetworkId.get(paymentMethodId) ?? []
+    );
+  }
+  const cardsForPaymentMethod = (paymentMethodId: number) =>
+    recommendationCardsByPaymentMethodId.get(paymentMethodId) ?? [];
+  const cardRecommendationFields = (card: (typeof cards)[number] | undefined) => card ? {
+    cardId: card.id,
+    issuerName: card.issuerName,
+    networkName: card.networkName
+  } : {};
+  const cardPaymentMethodName = (fallbackName: string, card: (typeof cards)[number] | undefined) =>
+    card ? `${card.issuerName} ${card.name} (${card.networkName})` : fallbackName;
   const selectedBranchId = selectedBranch?.id;
   const selectedOutletId = selectedOutlet?.id;
 
   const ruleRecommendations = rewardRules
     .filter((rule) => {
+      if (cardsForPaymentMethod(rule.paymentMethodId).length === 0) return false;
       const validMerchant = rule.merchantId === merchant.id;
       const validDate = date >= rule.validityStart && date <= rule.validityEnd;
       const validAmount = amount >= rule.amountThreshold;
@@ -114,7 +172,7 @@ export async function getRecommendations({
         validAmount &&
         validBranch;
     })
-    .map((rule): Recommendation => {
+    .flatMap((rule): Recommendation[] => {
       const benefitType = rule.benefitType ?? 'cashback';
       const estimatedSavings = calculateSavings(
         amount,
@@ -122,8 +180,8 @@ export async function getRecommendations({
         rule.cashbackRate,
         rule.fixedDiscountAmount
       );
-      return {
-        paymentMethod: rule.paymentMethodName || 'Unknown',
+      return cardsForPaymentMethod(rule.paymentMethodId).map((card) => ({
+        paymentMethod: cardPaymentMethodName(rule.paymentMethodName || 'Unknown', card),
         benefitType,
         cashbackRate: benefitType === 'cashback' ? rule.cashbackRate ?? 0 : undefined,
         fixedDiscountAmount: benefitType === 'fixed_discount' ? rule.fixedDiscountAmount ?? 0 : undefined,
@@ -134,13 +192,16 @@ export async function getRecommendations({
         sourceUrl: rule.sourceUrl ?? undefined,
         outletName: rule.outletName ?? undefined,
         branchId: rule.outletId ?? undefined,
-        branchName: rule.outletName ?? undefined
-      };
+        branchName: rule.outletName ?? undefined,
+        ...cardRecommendationFields(card)
+      }));
     });
 
   const promotionRecommendations: Recommendation[] = [];
   for (const promotion of promotions) {
-    if (!promotion.paymentMethodIds.some((id) => acceptedPaymentMethodIdSet.has(id))) continue;
+    if (!promotion.paymentMethodIds.some((id) =>
+      acceptedPaymentMethodIdSet.has(id) && cardsForPaymentMethod(id).length > 0
+    )) continue;
     if (date < promotion.validityStart || date > promotion.validityEnd || amount < promotion.amountThreshold) continue;
     if (promotion.excludedMerchantIds.includes(merchant.id)) continue;
     if (promotion.excludedBranchIds.includes(selectedBranchId ?? -1)) continue;
@@ -162,35 +223,44 @@ export async function getRecommendations({
       ? merchant.name
       : selectedOutlet?.name;
     for (const paymentMethodId of promotion.paymentMethodIds) {
-      const paymentMethod = paymentMethodNames.get(paymentMethodId);
+      const paymentMethod = paymentMethodsById.get(paymentMethodId);
       if (!paymentMethod || !acceptedPaymentMethodIdSet.has(paymentMethodId)) continue;
+      const recommendationCards = cardsForPaymentMethod(paymentMethodId).filter((card) => {
+        if (promotion.issuerIds.length > 0 && (!card || !promotion.issuerIds.includes(card.issuerId))) return false;
+        if (promotion.cardIds.length > 0 && (!card || !promotion.cardIds.includes(card.id))) return false;
+        return true;
+      });
+      if (recommendationCards.length === 0) continue;
       const estimatedSavings = calculateSavings(
         amount,
         promotion.benefitType,
         promotion.cashbackRate,
         promotion.fixedDiscountAmount
       );
-      promotionRecommendations.push({
-        paymentMethod,
-        benefitType: promotion.benefitType,
-        cashbackRate: promotion.benefitType === 'cashback' ? promotion.cashbackRate ?? 0 : undefined,
-        fixedDiscountAmount: promotion.benefitType === 'fixed_discount'
-          ? promotion.fixedDiscountAmount ?? 0
-          : undefined,
-        amountThreshold: promotion.amountThreshold,
-        estimatedCashback: promotion.benefitType === 'cashback' ? estimatedSavings : undefined,
-        estimatedSavings,
-        promotionNote: promotion.promotionNote ?? undefined,
-        sourceUrl: promotion.sourceUrl,
-        promotionId: promotion.id,
-        originType: promotion.originType,
-        originName,
-        eligibilityType: promotion.eligibilityType,
-        branchId: selectedBranchId,
-        branchName: selectedBranch?.name,
-        outletId: selectedOutletId,
-        outletName: selectedOutlet?.name
-      });
+      for (const card of recommendationCards) {
+        promotionRecommendations.push({
+          paymentMethod: cardPaymentMethodName(paymentMethod.name, card),
+          benefitType: promotion.benefitType,
+          cashbackRate: promotion.benefitType === 'cashback' ? promotion.cashbackRate ?? 0 : undefined,
+          fixedDiscountAmount: promotion.benefitType === 'fixed_discount'
+            ? promotion.fixedDiscountAmount ?? 0
+            : undefined,
+          amountThreshold: promotion.amountThreshold,
+          estimatedCashback: promotion.benefitType === 'cashback' ? estimatedSavings : undefined,
+          estimatedSavings,
+          promotionNote: promotion.promotionNote ?? undefined,
+          sourceUrl: promotion.sourceUrl,
+          promotionId: promotion.id,
+          originType: promotion.originType,
+          originName,
+          eligibilityType: promotion.eligibilityType,
+          branchId: selectedBranchId,
+          branchName: selectedBranch?.name,
+          outletId: selectedOutletId,
+          outletName: selectedOutlet?.name,
+          ...cardRecommendationFields(card)
+        });
+      }
     }
   }
 
