@@ -169,7 +169,8 @@ describe('getRecommendations', () => {
     originMerchantIds?: number[];
     originOutletIds?: number[];
     eligibilityType: 'merchant_wide' | 'selected_branches' | 'outlet';
-    paymentMethodId: number;
+    paymentMethodId?: number;
+    paymentMethodIds?: number[];
     eligibleBranchIds?: number[];
     excludedMerchantIds?: number[];
     excludedBranchIds?: number[];
@@ -209,7 +210,9 @@ describe('getRecommendations', () => {
         sourceUrl: input.sourceUrl,
         sourceTitle: 'Venue promotion',
         paymentMethods: {
-          create: [{ paymentMethod: { connect: { id: input.paymentMethodId } } }]
+          create: (input.paymentMethodIds ?? [input.paymentMethodId as number]).map((id) => ({
+            paymentMethod: { connect: { id } }
+          }))
         },
         eligibleBranches: {
           create: (input.eligibleBranchIds ?? []).map((branchId) => ({
@@ -305,10 +308,10 @@ describe('getRecommendations', () => {
       data: { name: 'Other Bank', normalizedName: 'otherbank' }
     });
     const allowedCard = await prisma.card.create({
-      data: { name: 'Everyday Card', kind: 'credit', issuerId: allowedIssuer.id, networkId: visa.id }
+      data: { name: 'Everyday Card', kind: 'credit', issuerId: allowedIssuer.id, networks: { create: [{ networkId: visa.id }] } }
     });
     await prisma.card.create({
-      data: { name: 'Travel Card', kind: 'credit', issuerId: otherIssuer.id, networkId: visa.id }
+      data: { name: 'Travel Card', kind: 'credit', issuerId: otherIssuer.id, networks: { create: [{ networkId: visa.id }] } }
     });
     await prisma.merchantIssuerRestriction.create({
       data: { merchantId: merchant.id, networkId: visa.id, issuerId: allowedIssuer.id }
@@ -333,10 +336,10 @@ describe('getRecommendations', () => {
       data: { name: 'Example Bank', normalizedName: 'examplebank' }
     });
     const excludedCard = await prisma.card.create({
-      data: { name: 'Excluded Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+      data: { name: 'Excluded Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: visa.id }] } }
     });
     const eligibleCard = await prisma.card.create({
-      data: { name: 'Eligible Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+      data: { name: 'Eligible Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: visa.id }] } }
     });
     await prisma.merchantCardExclusion.create({
       data: { merchantId: merchant.id, cardId: excludedCard.id }
@@ -361,7 +364,7 @@ describe('getRecommendations', () => {
       data: { name: 'Example Bank', normalizedName: 'examplebank' }
     });
     const card = await prisma.card.create({
-      data: { name: 'Everyday Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+      data: { name: 'Everyday Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: visa.id }] } }
     });
 
     const results = await getRecommendations({
@@ -416,7 +419,7 @@ describe('getRecommendations', () => {
       data: { name: 'Example Bank', normalizedName: 'examplebank' }
     });
     await prisma.card.create({
-      data: { name: 'Everyday Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+      data: { name: 'Everyday Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: visa.id }] } }
     });
 
     const results = await getRecommendations({
@@ -439,13 +442,13 @@ describe('getRecommendations', () => {
     const issuerA = await prisma.issuer.create({ data: { name: 'Bank A', normalizedName: 'banka' } });
     const issuerB = await prisma.issuer.create({ data: { name: 'Bank B', normalizedName: 'bankb' } });
     const cardA1 = await prisma.card.create({
-      data: { name: 'A One', kind: 'credit', issuerId: issuerA.id, networkId: visa.id }
+      data: { name: 'A One', kind: 'credit', issuerId: issuerA.id, networks: { create: [{ networkId: visa.id }] } }
     });
     const cardA2 = await prisma.card.create({
-      data: { name: 'A Two', kind: 'credit', issuerId: issuerA.id, networkId: visa.id }
+      data: { name: 'A Two', kind: 'credit', issuerId: issuerA.id, networks: { create: [{ networkId: visa.id }] } }
     });
     const cardB = await prisma.card.create({
-      data: { name: 'B One', kind: 'credit', issuerId: issuerB.id, networkId: visa.id }
+      data: { name: 'B One', kind: 'credit', issuerId: issuerB.id, networks: { create: [{ networkId: visa.id }] } }
     });
     const base = {
       originType: 'merchant' as const,
@@ -477,6 +480,104 @@ describe('getRecommendations', () => {
     expect(cardIdsFor(cardPromotion.id)).toEqual([cardB.id]);
     expect(cardIdsFor(bothPromotion.id)).toEqual([]);
     expect(cardIdsFor(legacyPromotion.id)).toEqual([cardA1.id, cardA2.id, cardB.id].sort());
+  });
+
+  describe('cards with several networks', () => {
+    async function setup() {
+      const merchant = await prisma.merchant.findUniqueOrThrow({ where: { name: 'FamilyMart' } });
+      const visa = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
+      const jcb = await prisma.paymentMethod.upsert({
+        where: { name: 'JCB' },
+        update: {},
+        create: { name: 'JCB', normalizedName: 'jcb', type: 'credit_card' }
+      });
+      await prisma.merchantPaymentAcceptance.create({
+        data: { merchantId: merchant.id, paymentMethodId: jcb.id }
+      });
+      const issuer = await prisma.issuer.create({ data: { name: 'Dual Bank', normalizedName: 'dualbank' } });
+      const card = await prisma.card.create({
+        data: {
+          name: 'Dual Card',
+          kind: 'credit',
+          issuerId: issuer.id,
+          networks: { create: [{ networkId: visa.id }, { networkId: jcb.id }] }
+        }
+      });
+      const base = {
+        originType: 'merchant' as const,
+        originMerchantIds: [merchant.id],
+        eligibilityType: 'merchant_wide' as const,
+        cardIds: [card.id]
+      };
+      return { merchant, visa, jcb, issuer, card, base };
+    }
+
+    const recommend = (merchantName: string) => getRecommendations({
+      merchant_name: merchantName,
+      amount: 500,
+      date: new Date('2026-10-01')
+    }) as Promise<ExpectedCardRecommendation[]>;
+
+    test('lists the card once per network and keeps network-specific promotions on their network', async () => {
+      const { merchant, visa, jcb, card, base } = await setup();
+      const shared = await createPromotion({
+        ...base,
+        paymentMethodIds: [visa.id, jcb.id],
+        sourceUrl: 'https://official.example/shared'
+      });
+      const visaOnly = await createPromotion({
+        ...base,
+        paymentMethodId: visa.id,
+        sourceUrl: 'https://official.example/visa-only'
+      });
+
+      const results = (await recommend(merchant.name)).filter((item) => item.cardId === card.id);
+      const linesFor = (promotionId: number) => results
+        .filter((item) => item.promotionId === promotionId)
+        .map((item) => item.paymentMethod)
+        .sort();
+
+      expect(linesFor(shared.id)).toEqual(['Dual Bank Dual Card (JCB)', 'Dual Bank Dual Card (VISA)']);
+      expect(linesFor(visaOnly.id)).toEqual(['Dual Bank Dual Card (VISA)']);
+    });
+
+    test('applies issuer allowlists per network and card exclusions to every network', async () => {
+      const { merchant, visa, jcb, issuer, card, base } = await setup();
+      const otherIssuer = await prisma.issuer.create({ data: { name: 'Other Bank', normalizedName: 'otherbank' } });
+      const promotion = await createPromotion({
+        ...base,
+        paymentMethodIds: [visa.id, jcb.id],
+        sourceUrl: 'https://official.example/shared'
+      });
+      await prisma.merchantIssuerRestriction.create({
+        data: { merchantId: merchant.id, networkId: visa.id, issuerId: otherIssuer.id }
+      });
+
+      let results = await recommend(merchant.name);
+      expect(results.filter((item) => item.promotionId === promotion.id).map((item) => item.paymentMethod))
+        .toEqual(['Dual Bank Dual Card (JCB)']);
+
+      await prisma.merchantIssuerRestriction.deleteMany();
+      await prisma.merchantCardExclusion.create({ data: { merchantId: merchant.id, cardId: card.id } });
+      results = await recommend(merchant.name);
+      expect(results.filter((item) => item.issuerName === issuer.name)).toEqual([]);
+    });
+
+    test('skips networks the merchant does not accept', async () => {
+      const { merchant, visa, jcb, card, base } = await setup();
+      const promotion = await createPromotion({
+        ...base,
+        paymentMethodIds: [visa.id, jcb.id],
+        sourceUrl: 'https://official.example/shared'
+      });
+      await prisma.merchantPaymentAcceptance.delete({
+        where: { merchantId_paymentMethodId: { merchantId: merchant.id, paymentMethodId: jcb.id } }
+      });
+
+      const results = await recommend(merchant.name);
+      expect(results.filter((item) => item.promotionId === promotion.id).map((item) => item.cardId))
+        .toEqual([card.id]);
+    });
   });
 
   test('does not give scoped promotions to generic network-only candidates', async () => {

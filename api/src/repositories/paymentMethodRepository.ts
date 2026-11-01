@@ -68,7 +68,7 @@ export async function updatePaymentMethod(
         ...(input.type !== 'credit_card' && {
           OR: [
             { type: { not: 'credit_card' } },
-            { cards: { none: {} }, issuerRestrictions: { none: {} } }
+            { cardNetworks: { none: {} }, issuerRestrictions: { none: {} } }
           ]
         })
       },

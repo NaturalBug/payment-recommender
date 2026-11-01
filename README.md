@@ -48,19 +48,23 @@ npm run db:seed
 
 Use `DATABASE_URL="file:./prisma/dev.db"` for local SQLite development. Keep
 the database file in `api/prisma/` and do not commit it; it is already ignored
-by git. `npm run db:push` first backfills `PaymentMethod.normalizedName` for
-older databases, then applies the current schema. It is safe to run on a new
+by git. `npm run db:push` first backfills `PaymentMethod.normalizedName` and
+moves each card's single `networkId` into the `CardNetwork` table for older
+databases, then applies the current schema. It is safe to run on a new
 empty database as well. Back up local SQLite data before applying schema
-updates. If you invoke Prisma directly, run the backfill first:
+updates. If you invoke Prisma directly, run the backfills first:
 
 ```bash
 npm run db:backfill-payment-method-names
+npm run db:migrate-card-networks
 npx prisma db push
 npm run db:seed
 ```
 
 The backfill preserves existing payment methods and stops with an error if
 their names normalize to duplicates; it does not reset or delete database data.
+The card network migration copies existing card-network links before rebuilding
+the `Card` table and keeps all dependent rows.
 
 Set `ADMIN_API_KEY` in `api/.env` before using the Admin Catalog page. The key
 must be sent in the `X-Admin-API-Key` header for every `/api/admin/*` request.
@@ -189,8 +193,8 @@ dependent acceptance mappings or reward rules exist.
 
 Card catalog and restriction endpoints use the same `X-Admin-API-Key` header
 as the other Admin API routes. Create an issuer, then create its card using the
-issuer ID and the ID of an existing `credit_card` payment method (the card's
-network). The `kind` is `credit`, `debit`, or `prepaid`.
+issuer ID and the IDs of one or more existing `credit_card` payment methods (the
+card's networks; a card may carry several, such as Visa and JCB). The `kind` is `credit`, `debit`, or `prepaid`.
 
 ```http
 POST /api/admin/issuers
@@ -205,7 +209,7 @@ POST /api/admin/cards
 X-Admin-API-Key: <admin-key>
 Content-Type: application/json
 
-{ "name": "Everyday Rewards", "kind": "credit", "issuerId": 1, "networkId": 2 }
+{ "name": "Everyday Rewards", "kind": "credit", "issuerId": 1, "networkIds": [2, 3] }
 ```
 
 Use `GET /api/admin/issuers`, `GET /api/admin/cards`, and the payment-method
@@ -237,7 +241,8 @@ exclusions, send exactly:
 The public recommendation endpoint remains
 `GET /api/recommendations?merchant_name=FamilyMart&amount=500&date=2026-11-01`.
 When an accepted credit-card network has catalog cards, eligible recommendations
-are expanded into named cards. Each `data` item includes `cardId`,
+are expanded into named cards, one line per accepted network of the card;
+network-specific promotions apply only to their network's line. Each `data` item includes `cardId`,
 `issuerName`, and `networkName`; its `paymentMethod` is displayed as
 `IssuerName CardName (NetworkName)`. Existing generic payment methods and
 network-only records continue to work: where no card catalog is configured for

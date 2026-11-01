@@ -8,8 +8,9 @@
     "start": "node dist/src/server.js",
     "test": "jest --runInBand",
     "db:generate": "prisma generate",
-    "db:push": "npm run db:backfill-payment-method-names && prisma db push",
+    "db:push": "npm run db:backfill-payment-method-names && npm run db:migrate-card-networks && prisma db push",
     "db:backfill-payment-method-names": "ts-node prisma/backfillPaymentMethodNormalizedNames.ts",
+    "db:migrate-card-networks": "ts-node prisma/migrateCardNetworks.ts",
     "db:seed": "ts-node prisma/seed.ts",
     "import:promotions": "ts-node src/scripts/importPromotions.ts"
   },

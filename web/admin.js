@@ -855,12 +855,12 @@ function renderIssuersAndCards() {
       </tr>`).join('')}</tbody></table>`
     : '<p class="muted">No issuers yet.</p>';
   cardsContainer.innerHTML = cards.length
-    ? `<table><thead><tr><th>Card</th><th>Kind</th><th>Issuer</th><th>Network</th><th></th></tr></thead><tbody>${cards.map((card) => `
+    ? `<table><thead><tr><th>Card</th><th>Kind</th><th>Issuer</th><th>Networks</th><th></th></tr></thead><tbody>${cards.map((card) => `
       <tr>
         <td>${escapeHtml(card.name)}</td>
         <td>${escapeHtml(card.kind)}</td>
         <td>${escapeHtml(issuerName(card.issuerId))}</td>
-        <td>${escapeHtml(networkName(card.networkId))}</td>
+        <td>${escapeHtml(card.networkIds.map(networkName).join(', '))}</td>
         <td class="table-actions"><button type="button" class="danger-button delete-card" data-card-id="${card.id}">Delete</button></td>
       </tr>`).join('')}</tbody></table>`
     : '<p class="muted">No cards yet.</p>';
@@ -1359,8 +1359,12 @@ cardForm.addEventListener('submit', async (event) => {
     name: String(form.get('name')).trim(),
     kind: form.get('kind'),
     issuerId: Number(form.get('issuerId')),
-    networkId: Number(form.get('networkId'))
+    networkIds: form.getAll('networkIds').map(Number)
   };
+  if (payload.networkIds.length === 0) {
+    setCatalogStatus('Select at least one network.', true);
+    return;
+  }
   try {
     await requestJson('/api/admin/cards', { method: 'POST', body: JSON.stringify(payload) });
     cardForm.reset();

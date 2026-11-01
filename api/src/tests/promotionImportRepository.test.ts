@@ -523,7 +523,7 @@ describe('promotion import repository', () => {
     });
     const issuer = await prisma.issuer.create({ data: { name: 'Scope Bank', normalizedName: 'scopebank' } });
     const card = await prisma.card.create({
-      data: { name: 'Scope Card', kind: 'credit', issuerId: issuer.id, networkId: network.id }
+      data: { name: 'Scope Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: network.id }] } }
     });
 
     await expect(updatePromotionDraft(draft.id, { issuerIds: [issuer.id + 999] }))

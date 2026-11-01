@@ -383,7 +383,7 @@ describe('admin routes', () => {
     const method = await prisma.paymentMethod.findUniqueOrThrow({ where: { name: 'VISA' } });
     const issuer = await prisma.issuer.create({ data: { name: 'Route Bank', normalizedName: 'routebank' } });
     const card = await prisma.card.create({
-      data: { name: 'Route Card', kind: 'credit', issuerId: issuer.id, networkId: method.id }
+      data: { name: 'Route Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: method.id }] } }
     });
     const url = `/api/admin/promotion-drafts/${draft.id}`;
 
@@ -617,7 +617,7 @@ describe('admin routes', () => {
       });
       if (reference === 'card') {
         const card = await prisma.card.create({
-          data: { name: 'Card', kind: 'credit', issuerId: issuer.id, networkId: visa.id }
+          data: { name: 'Card', kind: 'credit', issuerId: issuer.id, networks: { create: [{ networkId: visa.id }] } }
         });
         await prisma.merchantCardExclusion.create({ data: { merchantId: merchant.id, cardId: card.id } });
       } else {
@@ -1252,11 +1252,15 @@ describe('admin routes', () => {
       const card = await request(app)
         .post('/api/admin/cards')
         .set(key)
-        .send({ name: 'LINE Pay Card', kind: 'credit', issuerId: issuer.body.data.id, networkId: network.id });
+        .send({ name: 'LINE Pay Card', kind: 'credit', issuerId: issuer.body.data.id, networkIds: [network.id] });
       const invalidCard = await request(app)
         .post('/api/admin/cards')
         .set(key)
-        .send({ name: 'Bad', kind: 'credit', issuerId: 999999, networkId: network.id });
+        .send({ name: 'Bad', kind: 'credit', issuerId: 999999, networkIds: [network.id] });
+      const missingNetworks = await request(app)
+        .post('/api/admin/cards')
+        .set(key)
+        .send({ name: 'No Network', kind: 'credit', issuerId: issuer.body.data.id, networkIds: [] });
       const issuedConflict = await request(app).delete(`/api/admin/issuers/${issuer.body.data.id}`).set(key);
       const cards = await request(app).get('/api/admin/cards').set(key);
       const deletedCard = await request(app).delete(`/api/admin/cards/${card.body.data.id}`).set(key);
@@ -1267,6 +1271,8 @@ describe('admin routes', () => {
       expect(duplicate.status).toBe(409);
       expect(card.status).toBe(201);
       expect(invalidCard.status).toBe(400);
+      expect(missingNetworks.status).toBe(400);
+      expect(card.body.data.networkIds).toEqual([network.id]);
       expect(issuedConflict.status).toBe(409);
       expect(cards.body.data).toHaveLength(1);
       expect(deletedCard.status).toBe(200);

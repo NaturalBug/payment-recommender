@@ -17,12 +17,11 @@ export type CardRecord = {
   name: string;
   kind: string;
   issuerId: number;
-  networkId: number;
+  networkIds: number[];
 };
 
 export type RecommendationCardRecord = CardRecord & {
   issuerName: string;
-  networkName: string;
 };
 
 export type MerchantCardRules = {
@@ -46,8 +45,15 @@ const cardSelect = {
   name: true,
   kind: true,
   issuerId: true,
-  networkId: true
+  networks: { orderBy: { networkId: 'asc' }, select: { networkId: true } }
 } as const;
+
+function toCardRecord<T extends { networks: Array<{ networkId: number }> }>(
+  card: T
+): Omit<T, 'networks'> & { networkIds: number[] } {
+  const { networks, ...rest } = card;
+  return { ...rest, networkIds: networks.map((network) => network.networkId) };
+}
 
 export async function listIssuers(): Promise<IssuerRecord[]> {
   return prisma.issuer.findMany({
@@ -104,10 +110,12 @@ export async function deleteIssuer(id: number): Promise<boolean> {
 }
 
 export async function listCards(): Promise<CardRecord[]> {
-  return prisma.card.findMany({
+  const cards = await prisma.card.findMany({
     orderBy: [{ issuerId: 'asc' }, { name: 'asc' }],
     select: cardSelect
   });
+
+  return cards.map(toCardRecord);
 }
 
 export async function listRecommendationCards(): Promise<RecommendationCardRecord[]> {
@@ -115,15 +123,13 @@ export async function listRecommendationCards(): Promise<RecommendationCardRecor
     orderBy: [{ issuerId: 'asc' }, { name: 'asc' }],
     select: {
       ...cardSelect,
-      issuer: { select: { name: true } },
-      network: { select: { name: true } }
+      issuer: { select: { name: true } }
     }
   });
 
-  return cards.map(({ issuer, network, ...card }) => ({
-    ...card,
-    issuerName: issuer.name,
-    networkName: network.name
+  return cards.map(({ issuer, ...card }) => ({
+    ...toCardRecord(card),
+    issuerName: issuer.name
   }));
 }
 
@@ -131,7 +137,7 @@ export async function createCard(input: {
   name: string;
   kind: string;
   issuerId: number;
-  networkId: number;
+  networkIds: number[];
 }): Promise<CardRecord> {
   const name = input.name.trim();
   if (!name) {
@@ -139,6 +145,10 @@ export async function createCard(input: {
   }
   if (!['credit', 'debit', 'prepaid'].includes(input.kind)) {
     throw new RepositoryValidationError('card kind must be credit, debit, or prepaid');
+  }
+  const networkIds = [...new Set(input.networkIds)].sort((a, b) => a - b);
+  if (networkIds.length === 0 || networkIds.length !== input.networkIds.length) {
+    throw new RepositoryValidationError('card networks must be a non-empty list without duplicates');
   }
 
   return prisma.$transaction(async (transaction) => {
@@ -151,23 +161,23 @@ export async function createCard(input: {
     }
 
     const networkLock = await transaction.paymentMethod.updateMany({
-      where: { id: input.networkId, type: 'credit_card' },
+      where: { id: { in: networkIds }, type: 'credit_card' },
       data: { type: 'credit_card' }
     });
-    if (networkLock.count === 0) {
-      throw new RepositoryValidationError('network must be an existing credit-card payment method');
+    if (networkLock.count !== networkIds.length) {
+      throw new RepositoryValidationError('networks must be existing credit-card payment methods');
     }
 
     try {
-      return await transaction.card.create({
+      return toCardRecord(await transaction.card.create({
         data: {
           name,
           kind: input.kind,
           issuerId: input.issuerId,
-          networkId: input.networkId
+          networks: { create: networkIds.map((networkId) => ({ networkId })) }
         },
         select: cardSelect
-      });
+      }));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
