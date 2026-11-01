@@ -53,6 +53,8 @@ type PromotionDraftRow = {
   excludedMerchants: { merchantId: number }[];
   excludedBranches: { branchId: number }[];
   paymentMethods: { paymentMethodId: number }[];
+  issuers: { issuerId: number }[];
+  cards: { cardId: number }[];
   merchantId: number | null;
   paymentMethodId: number | null;
   benefitType: string;
@@ -115,6 +117,8 @@ const promotionDraftSelect = {
   excludedMerchants: { select: { merchantId: true } },
   excludedBranches: { select: { branchId: true } },
   paymentMethods: { select: { paymentMethodId: true } },
+  issuers: { select: { issuerId: true }, orderBy: { issuerId: 'asc' } },
+  cards: { select: { cardId: true }, orderBy: { cardId: 'asc' } },
   merchantId: true,
   paymentMethodId: true,
   benefitType: true,
@@ -181,6 +185,8 @@ function toPromotionDraftRecord(row: PromotionDraftRow): PromotionDraftRecord {
     excludedMerchantIds: row.excludedMerchants.map(({ merchantId }) => merchantId),
     excludedBranchIds: row.excludedBranches.map(({ branchId }) => branchId),
     paymentMethodIds: row.paymentMethods.map(({ paymentMethodId }) => paymentMethodId),
+    issuerIds: row.issuers.map(({ issuerId }) => issuerId),
+    cardIds: row.cards.map(({ cardId }) => cardId),
     merchantId: row.merchantId,
     paymentMethodId: row.paymentMethodId,
     benefitType: row.benefitType as PromotionDraftRecord['benefitType'],
@@ -431,6 +437,8 @@ async function replaceDraftScope(
   const suppliedExcludedMerchantIds = validateScopeIds(input.excludedMerchantIds, 'excludedMerchantIds');
   const suppliedExcludedBranchIds = validateScopeIds(input.excludedBranchIds, 'excludedBranchIds');
   const paymentMethodIds = validateScopeIds(input.paymentMethodIds, 'paymentMethodIds');
+  const issuerIds = validateScopeIds(input.issuerIds, 'issuerIds');
+  const cardIds = validateScopeIds(input.cardIds, 'cardIds');
   const suppliedOriginMerchantIds = validateScopeIds(input.originMerchantIds, 'originMerchantIds');
   const suppliedOriginOutletIds = validateScopeIds(input.originOutletIds, 'originOutletIds');
   const originType = input.originType !== undefined ? input.originType : previousDraft?.originType;
@@ -499,6 +507,18 @@ async function replaceDraftScope(
       throw new RepositoryValidationError('payment methods contain an unknown ID');
     }
   }
+  if (issuerIds !== undefined) {
+    const count = await transaction.issuer.count({ where: { id: { in: issuerIds } } });
+    if (count !== issuerIds.length) {
+      throw new RepositoryValidationError('issuers contain an unknown ID');
+    }
+  }
+  if (cardIds !== undefined) {
+    const count = await transaction.card.count({ where: { id: { in: cardIds } } });
+    if (count !== cardIds.length) {
+      throw new RepositoryValidationError('cards contain an unknown ID');
+    }
+  }
 
   if (originChanged) {
     await transaction.promotionDraftOriginMerchant.deleteMany({ where: { draftId } });
@@ -563,6 +583,22 @@ async function replaceDraftScope(
     if (paymentMethodIds.length) {
       await transaction.promotionDraftPaymentMethod.createMany({
         data: paymentMethodIds.map((paymentMethodId) => ({ draftId, paymentMethodId }))
+      });
+    }
+  }
+  if (issuerIds !== undefined) {
+    await transaction.promotionDraftIssuer.deleteMany({ where: { draftId } });
+    if (issuerIds.length) {
+      await transaction.promotionDraftIssuer.createMany({
+        data: issuerIds.map((issuerId) => ({ draftId, issuerId }))
+      });
+    }
+  }
+  if (cardIds !== undefined) {
+    await transaction.promotionDraftCard.deleteMany({ where: { draftId } });
+    if (cardIds.length) {
+      await transaction.promotionDraftCard.createMany({
+        data: cardIds.map((cardId) => ({ draftId, cardId }))
       });
     }
   }
@@ -871,6 +907,12 @@ export async function publishPromotionDraft(id: number): Promise<PublishedDraftR
             create: draft.paymentMethods.map(({ paymentMethodId }) => ({
               paymentMethod: { connect: { id: paymentMethodId } }
             }))
+          },
+          issuers: {
+            create: draft.issuers.map(({ issuerId }) => ({ issuer: { connect: { id: issuerId } } }))
+          },
+          cards: {
+            create: draft.cards.map(({ cardId }) => ({ card: { connect: { id: cardId } } }))
           },
           eligibleBranches: {
             create: eligibleBranchIds.map((branchId) => ({ branch: { connect: { id: branchId } } }))

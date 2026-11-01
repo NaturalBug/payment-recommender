@@ -98,6 +98,8 @@ export type PromotionDraftReviewInput = {
   excludedMerchantIds?: number[];
   excludedBranchIds?: number[];
   paymentMethodIds?: number[];
+  issuerIds?: number[];
+  cardIds?: number[];
   merchantId?: number | null;
   paymentMethodId?: number | null;
   benefitType?: 'cashback' | 'fixed_discount' | null;
@@ -140,6 +142,8 @@ export type PromotionDraftRecord = {
   excludedMerchantIds: number[];
   excludedBranchIds: number[];
   paymentMethodIds: number[];
+  issuerIds: number[];
+  cardIds: number[];
   merchantId?: number | null;
   paymentMethodId?: number | null;
   benefitType: 'cashback' | 'fixed_discount';
@@ -172,6 +176,8 @@ export type PromotionRecord = {
   sourceUrl: string;
   sourceTitle: string;
   paymentMethodIds: number[];
+  issuerIds: number[];
+  cardIds: number[];
   eligibleBranchIds: number[];
   excludedMerchantIds: number[];
   excludedBranchIds: number[];

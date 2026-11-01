@@ -36,6 +36,8 @@ describe('promotion import repository', () => {
     await prisma.merchantPaymentAcceptance.deleteMany();
     await prisma.importRun.deleteMany();
     await prisma.merchant.deleteMany();
+    await prisma.card.deleteMany();
+    await prisma.issuer.deleteMany();
     await prisma.paymentMethod.deleteMany();
   });
 
@@ -512,6 +514,49 @@ describe('promotion import repository', () => {
         select: { promotionNote: true }
       })
     ).resolves.toMatchObject({ promotionNote: 'Verified manually' });
+  });
+
+  test('round-trips and publishes issuer and card scopes, and rejects invalid ones', async () => {
+    const { draft, paymentMethod, reviewInput } = await createReviewedDraftFixture();
+    const network = await prisma.paymentMethod.create({
+      data: { name: 'Scope VISA', normalizedName: 'scopevisa', type: 'credit_card' }
+    });
+    const issuer = await prisma.issuer.create({ data: { name: 'Scope Bank', normalizedName: 'scopebank' } });
+    const card = await prisma.card.create({
+      data: { name: 'Scope Card', kind: 'credit', issuerId: issuer.id, networkId: network.id }
+    });
+
+    await expect(updatePromotionDraft(draft.id, { issuerIds: [issuer.id + 999] }))
+      .rejects.toBeInstanceOf(RepositoryValidationError);
+    await expect(updatePromotionDraft(draft.id, { cardIds: [card.id, card.id] }))
+      .rejects.toBeInstanceOf(RepositoryValidationError);
+    await expect(updatePromotionDraft(draft.id, { cardIds: [card.id + 999] }))
+      .rejects.toBeInstanceOf(RepositoryValidationError);
+
+    const updated = await updatePromotionDraft(draft.id, {
+      ...reviewInput,
+      paymentMethodIds: [paymentMethod.id],
+      issuerIds: [issuer.id],
+      cardIds: [card.id]
+    });
+    expect(updated).toMatchObject({ issuerIds: [issuer.id], cardIds: [card.id] });
+
+    const untouched = await updatePromotionDraft(draft.id, { promotionNote: 'Still scoped' });
+    expect(untouched).toMatchObject({ issuerIds: [issuer.id], cardIds: [card.id] });
+
+    const published = await publishPromotionDraft(draft.id);
+    expect(published.promotion).toMatchObject({ issuerIds: [issuer.id], cardIds: [card.id] });
+    await expect(prisma.promotionCard.count({ where: { promotionId: published.promotion.id } })).resolves.toBe(1);
+  });
+
+  test('publishes drafts without scopes as network-wide promotions', async () => {
+    const { draft, reviewInput } = await createReviewedDraftFixture();
+    await updatePromotionDraft(draft.id, reviewInput);
+
+    const published = await publishPromotionDraft(draft.id);
+
+    expect(published.draft).toMatchObject({ issuerIds: [], cardIds: [] });
+    expect(published.promotion).toMatchObject({ issuerIds: [], cardIds: [] });
   });
 
   test('publishes explicit Merchant branch and Outlet exclusion scopes without creating RewardRules', async () => {
