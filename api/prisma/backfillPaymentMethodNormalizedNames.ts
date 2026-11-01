@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { normalizePaymentMethodKey } from '../src/lib/normalization';
 import { getDatabaseUrl } from '../src/config/env';
+import { ensureDatabaseDirectory } from './ensureDatabaseDirectory';
 
 type PaymentMethodColumn = {
   name: string;
@@ -71,7 +72,9 @@ export async function backfillPaymentMethodNormalizedNames(prisma: PrismaClient)
 }
 
 async function main(): Promise<void> {
-  const prisma = new PrismaClient({ datasources: { db: { url: getDatabaseUrl() } } });
+  const databaseUrl = getDatabaseUrl();
+  ensureDatabaseDirectory(databaseUrl);
+  const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
   try {
     await backfillPaymentMethodNormalizedNames(prisma);

@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getDatabaseUrl } from '../src/config/env';
+import { ensureDatabaseDirectory } from './ensureDatabaseDirectory';
 
 type TableColumn = {
   name: string;
@@ -71,6 +72,7 @@ export async function migrateCardNetworks(prisma: PrismaClient): Promise<void> {
 async function main(): Promise<void> {
   // A single connection keeps the foreign key pragma on the connection that rebuilds the table.
   const databaseUrl = getDatabaseUrl();
+  ensureDatabaseDirectory(databaseUrl);
   const separator = databaseUrl.includes('?') ? '&' : '?';
   const prisma = new PrismaClient({
     datasources: { db: { url: `${databaseUrl}${separator}connection_limit=1` } }
