@@ -25,6 +25,16 @@ import {
   listAcceptedPaymentMethods,
   removeAcceptance
 } from '../repositories/merchantPaymentAcceptanceRepository';
+import {
+  createCard,
+  createIssuer,
+  deleteCard,
+  deleteIssuer,
+  getMerchantCardRules,
+  listCards,
+  listIssuers,
+  replaceMerchantCardRules
+} from '../repositories/cardRepository';
 import { createMerchantBranch, listMerchantBranches } from '../repositories/merchantBranchRepository';
 import { createOutlet, listOutlets } from '../repositories/outletRepository';
 import {
@@ -45,6 +55,7 @@ import { listPromotions } from '../repositories/promotionRepository';
 import {
   MerchantAlreadyExistsError,
   RepositoryConflictError,
+  RepositoryNotFoundError,
   RepositoryValidationError
 } from '../repositories/errors';
 import type {
@@ -67,6 +78,8 @@ const promotionDraftReviewFields = [
   'excludedMerchantIds',
   'excludedBranchIds',
   'paymentMethodIds',
+  'issuerIds',
+  'cardIds',
   'merchantId',
   'paymentMethodId',
   'benefitType',
@@ -186,7 +199,7 @@ function parsePromotionDraftReviewPatch(
     patch.eligibilityType = values.eligibilityType as PromotionDraftReviewInput['eligibilityType'];
   }
 
-  for (const field of ['originMerchantIds', 'originOutletIds', 'eligibleBranchIds', 'excludedMerchantIds', 'excludedBranchIds', 'paymentMethodIds'] as const) {
+  for (const field of ['originMerchantIds', 'originOutletIds', 'eligibleBranchIds', 'excludedMerchantIds', 'excludedBranchIds', 'paymentMethodIds', 'issuerIds', 'cardIds'] as const) {
     if (!hasOwn(values, field)) continue;
     if (!Array.isArray(values[field])) {
       throw new RepositoryValidationError(`${field} must be an array of positive integer IDs`);
@@ -615,6 +628,172 @@ router.delete('/payment-method-types/:id', async (req, res) => {
       success: false,
       message: error instanceof Error ? error.message : 'unable to delete payment method type'
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Issuers, Cards, and Merchant Card Rules
+// ---------------------------------------------------------------------------
+
+function sendCatalogError(res: Parameters<RequestHandler>[1], error: unknown, fallback: string) {
+  if (error instanceof RepositoryConflictError) {
+    return res.status(409).json({ success: false, message: error.message });
+  }
+  if (error instanceof RepositoryValidationError) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+  if (error instanceof RepositoryNotFoundError) {
+    return res.status(404).json({ success: false, message: error.message });
+  }
+  return res.status(500).json({
+    success: false,
+    message: error instanceof Error ? error.message : fallback
+  });
+}
+
+router.get('/issuers', async (_req, res) => {
+  try {
+    return res.json({ success: true, data: await listIssuers() });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to list issuers');
+  }
+});
+
+router.post('/issuers', async (req, res) => {
+  const name = req.body?.name;
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'name is required' });
+  }
+
+  try {
+    return res.status(201).json({ success: true, data: await createIssuer(name) });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to create issuer');
+  }
+});
+
+router.delete('/issuers/:id', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'issuer not found' });
+  }
+
+  try {
+    if (!(await deleteIssuer(id))) {
+      return res.status(404).json({ success: false, message: 'issuer not found' });
+    }
+    return res.json({ success: true, data: { deleted: true } });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to delete issuer');
+  }
+});
+
+router.get('/cards', async (_req, res) => {
+  try {
+    return res.json({ success: true, data: await listCards() });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to list cards');
+  }
+});
+
+router.post('/cards', async (req, res) => {
+  const { name, kind, issuerId, networkId } = req.body ?? {};
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'name is required' });
+  }
+  if (typeof kind !== 'string' || !kind.trim()) {
+    return res.status(400).json({ success: false, message: 'kind is required' });
+  }
+  if (!Number.isInteger(issuerId) || issuerId <= 0 || !Number.isInteger(networkId) || networkId <= 0) {
+    return res.status(400).json({ success: false, message: 'issuerId and networkId must be positive integers' });
+  }
+
+  try {
+    return res.status(201).json({ success: true, data: await createCard({ name, kind, issuerId, networkId }) });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to create card');
+  }
+});
+
+router.delete('/cards/:id', async (req, res) => {
+  const id = parsePositiveIntId(req.params.id);
+  if (id === null) {
+    return res.status(404).json({ success: false, message: 'card not found' });
+  }
+
+  try {
+    if (!(await deleteCard(id))) {
+      return res.status(404).json({ success: false, message: 'card not found' });
+    }
+    return res.json({ success: true, data: { deleted: true } });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to delete card');
+  }
+});
+
+router.get('/merchants/:merchantId/card-rules', async (req, res) => {
+  const merchantId = parsePositiveIntId(req.params.merchantId);
+  if (merchantId === null) {
+    return res.status(404).json({ success: false, message: 'merchant not found' });
+  }
+
+  try {
+    return res.json({ success: true, data: await getMerchantCardRules(merchantId) });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to load card rules');
+  }
+});
+
+router.put('/merchants/:merchantId/card-rules', async (req, res) => {
+  const merchantId = parsePositiveIntId(req.params.merchantId);
+  if (merchantId === null) {
+    return res.status(404).json({ success: false, message: 'merchant not found' });
+  }
+
+  const { issuerIdsByNetwork, excludedCardIds, expectedCurrentRules } = req.body ?? {};
+  if (
+    !issuerIdsByNetwork ||
+    typeof issuerIdsByNetwork !== 'object' ||
+    Array.isArray(issuerIdsByNetwork) ||
+    !Array.isArray(excludedCardIds)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'issuerIdsByNetwork object and excludedCardIds array are required'
+    });
+  }
+
+  try {
+    if (
+      expectedCurrentRules !== undefined && (
+        !expectedCurrentRules ||
+        typeof expectedCurrentRules !== 'object' ||
+        Array.isArray(expectedCurrentRules) ||
+        typeof (expectedCurrentRules as Record<string, unknown>).issuerIdsByNetwork !== 'object' ||
+        Array.isArray((expectedCurrentRules as Record<string, unknown>).issuerIdsByNetwork) ||
+        !Array.isArray((expectedCurrentRules as Record<string, unknown>).excludedCardIds)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'expectedCurrentRules must include issuerIdsByNetwork and excludedCardIds'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: await replaceMerchantCardRules(
+        merchantId,
+        { issuerIdsByNetwork, excludedCardIds },
+        {
+          expectedCurrentRules: expectedCurrentRules as
+            | { issuerIdsByNetwork: Record<number, number[]>; excludedCardIds: number[] }
+            | undefined
+        }
+      )
+    });
+  } catch (error) {
+    return sendCatalogError(res, error, 'unable to save card rules');
   }
 });
 

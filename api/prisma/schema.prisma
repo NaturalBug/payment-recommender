@@ -18,24 +18,26 @@ model Merchant {
   location  String?
   notes     String?
 
-  acceptedMethods MerchantPaymentAcceptance[]
-  branches        MerchantBranch[]
-  promotionDrafts PromotionDraft[]
-  originDrafts    PromotionDraftOriginMerchant[]
-  excludedDrafts  PromotionDraftExcludedMerchant[]
-  originPromotions PromotionOriginMerchant[]
+  acceptedMethods    MerchantPaymentAcceptance[]
+  branches           MerchantBranch[]
+  promotionDrafts    PromotionDraft[]
+  originDrafts       PromotionDraftOriginMerchant[]
+  excludedDrafts     PromotionDraftExcludedMerchant[]
+  originPromotions   PromotionOriginMerchant[]
   excludedPromotions PromotionExcludedMerchant[]
-  rewardRules     RewardRule[]
+  rewardRules        RewardRule[]
+  issuerRestrictions MerchantIssuerRestriction[]
+  cardExclusions     MerchantCardExclusion[]
 }
 
 model Outlet {
-  id             Int    @id @default(autoincrement())
-  name           String @unique
-  normalizedName String @unique
+  id             Int     @id @default(autoincrement())
+  name           String  @unique
+  normalizedName String  @unique
   location       String?
 
-  branches MerchantBranch[]
-  originDrafts PromotionDraftOriginOutlet[]
+  branches         MerchantBranch[]
+  originDrafts     PromotionDraftOriginOutlet[]
   originPromotions PromotionOriginOutlet[]
 }
 
@@ -49,12 +51,12 @@ model MerchantBranch {
   outlet         Outlet?  @relation(fields: [outletId], references: [id], onDelete: Restrict)
   outletId       Int?
 
-  promotionDrafts PromotionDraft[]
-  eligibleDrafts  PromotionDraftEligibleBranch[]
-  excludedDrafts  PromotionDraftExcludedBranch[]
+  promotionDrafts    PromotionDraft[]
+  eligibleDrafts     PromotionDraftEligibleBranch[]
+  excludedDrafts     PromotionDraftExcludedBranch[]
   eligiblePromotions PromotionEligibleBranch[]
   excludedPromotions PromotionExcludedBranch[]
-  rewardRules     RewardRule[]
+  rewardRules        RewardRule[]
 
   @@unique([merchantId, normalizedName])
   @@map("MerchantOutlet")
@@ -66,11 +68,13 @@ model PaymentMethod {
   normalizedName String @unique
   type           String
 
-  acceptedBy MerchantPaymentAcceptance[]
-  promotionDrafts PromotionDraft[]
-  draftSelections PromotionDraftPaymentMethod[]
-  promotions PromotionPaymentMethod[]
-  rewardRules RewardRule[]
+  acceptedBy         MerchantPaymentAcceptance[]
+  promotionDrafts    PromotionDraft[]
+  draftSelections    PromotionDraftPaymentMethod[]
+  promotions         PromotionPaymentMethod[]
+  rewardRules        RewardRule[]
+  cards              Card[]
+  issuerRestrictions MerchantIssuerRestriction[]
 }
 
 model PaymentMethodType {
@@ -87,7 +91,8 @@ model MerchantPaymentAcceptance {
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
   paymentMethodId Int
 
-  rewardRules RewardRule[] @relation("AcceptedPaymentMethodRewardRules")
+  rewardRules        RewardRule[]                @relation("AcceptedPaymentMethodRewardRules")
+  issuerRestrictions MerchantIssuerRestriction[]
 
   @@unique([merchantId, paymentMethodId])
 }
@@ -103,17 +108,17 @@ model RewardRule {
 
   acceptance MerchantPaymentAcceptance @relation("AcceptedPaymentMethodRewardRules", fields: [merchantId, paymentMethodId], references: [merchantId, paymentMethodId], onDelete: Restrict)
 
-  benefitType          String   @default("cashback")
-  cashbackRate         Decimal?
+  benefitType         String          @default("cashback")
+  cashbackRate        Decimal?
   fixedDiscountAmount Int?
-  amountThreshold Int
-  validityStart   DateTime
-  validityEnd     DateTime
-  promotionNote   String?
-  sourceUrl       String?
-  branch          MerchantBranch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  branchId        Int?            @map("outletId")
-  promotionDraft  PromotionDraft?
+  amountThreshold     Int
+  validityStart       DateTime
+  validityEnd         DateTime
+  promotionNote       String?
+  sourceUrl           String?
+  branch              MerchantBranch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  branchId            Int?            @map("outletId")
+  promotionDraft      PromotionDraft?
 }
 
 model ImportRun {
@@ -121,10 +126,10 @@ model ImportRun {
 
   source       String
   status       String
-  startedAt    DateTime @default(now())
+  startedAt    DateTime  @default(now())
   completedAt  DateTime?
   errorMessage String?
-  draftCount   Int      @default(0)
+  draftCount   Int       @default(0)
 
   drafts PromotionDraft[]
 }
@@ -142,50 +147,52 @@ model PromotionDraft {
   sourceContent     String
   fetchedAt         DateTime
 
-  parsedCashbackRate    Decimal?
-  parsedBenefitType     String?
-  parsedFixedDiscountAmount Int?
-  parsedAmountThreshold Int?
-  parsedValidityStart   DateTime?
-  parsedValidityEnd     DateTime?
-  cashbackRateReviewed    Boolean @default(false)
-  benefitTypeReviewed    Boolean @default(false)
-  fixedDiscountAmountReviewed Boolean @default(false)
-  amountThresholdReviewed Boolean @default(false)
-  validityStartReviewed   Boolean @default(false)
-  validityEndReviewed     Boolean @default(false)
+  parsedCashbackRate          Decimal?
+  parsedBenefitType           String?
+  parsedFixedDiscountAmount   Int?
+  parsedAmountThreshold       Int?
+  parsedValidityStart         DateTime?
+  parsedValidityEnd           DateTime?
+  cashbackRateReviewed        Boolean   @default(false)
+  benefitTypeReviewed         Boolean   @default(false)
+  fixedDiscountAmountReviewed Boolean   @default(false)
+  amountThresholdReviewed     Boolean   @default(false)
+  validityStartReviewed       Boolean   @default(false)
+  validityEndReviewed         Boolean   @default(false)
 
   status String @default("pending_review")
 
   merchant   Merchant? @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   merchantId Int?
 
-  originType       String?
-  eligibilityType  String?
+  originType      String?
+  eligibilityType String?
 
   paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
   paymentMethodId Int?
 
-  benefitType          String   @default("cashback")
-  cashbackRate         Decimal?
+  benefitType         String          @default("cashback")
+  cashbackRate        Decimal?
   fixedDiscountAmount Int?
-  amountThreshold Int?
-  validityStart   DateTime?
-  validityEnd     DateTime?
-  promotionNote   String?
-  branch          MerchantBranch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  branchId        Int?            @map("outletId")
+  amountThreshold     Int?
+  validityStart       DateTime?
+  validityEnd         DateTime?
+  promotionNote       String?
+  branch              MerchantBranch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  branchId            Int?            @map("outletId")
 
   rewardRule   RewardRule? @relation(fields: [rewardRuleId], references: [id], onDelete: Restrict)
   rewardRuleId Int?        @unique
   promotion    Promotion?
 
-  originMerchants PromotionDraftOriginMerchant[]
-  originOutlets PromotionDraftOriginOutlet[]
-  eligibleBranches PromotionDraftEligibleBranch[]
+  originMerchants   PromotionDraftOriginMerchant[]
+  originOutlets     PromotionDraftOriginOutlet[]
+  eligibleBranches  PromotionDraftEligibleBranch[]
   excludedMerchants PromotionDraftExcludedMerchant[]
-  excludedBranches PromotionDraftExcludedBranch[]
-  paymentMethods PromotionDraftPaymentMethod[]
+  excludedBranches  PromotionDraftExcludedBranch[]
+  paymentMethods    PromotionDraftPaymentMethod[]
+  issuers           PromotionDraftIssuer[]
+  cards             PromotionDraftCard[]
 
   reviewedAt      DateTime?
   rejectionReason String?
@@ -210,19 +217,19 @@ model PromotionDraftOriginOutlet {
 }
 
 model PromotionDraftPaymentMethod {
-  draft          PromotionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
-  draftId        Int
-  paymentMethod  PaymentMethod  @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
+  draft           PromotionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId         Int
+  paymentMethod   PaymentMethod  @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
   paymentMethodId Int
 
   @@id([draftId, paymentMethodId])
 }
 
 model PromotionDraftEligibleBranch {
-  draft     PromotionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
-  draftId   Int
-  branch    MerchantBranch @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  branchId  Int
+  draft    PromotionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId  Int
+  branch   MerchantBranch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  branchId Int
 
   @@id([draftId, branchId])
 }
@@ -246,35 +253,37 @@ model PromotionDraftExcludedBranch {
 }
 
 model Promotion {
-  id                 Int      @id @default(autoincrement())
-  sourceDraft        PromotionDraft @relation(fields: [sourceDraftId], references: [id], onDelete: Restrict)
-  sourceDraftId      Int      @unique
-  originType         String
-  eligibilityType    String
-  benefitType        String
-  cashbackRate       Decimal?
+  id                  Int            @id @default(autoincrement())
+  sourceDraft         PromotionDraft @relation(fields: [sourceDraftId], references: [id], onDelete: Restrict)
+  sourceDraftId       Int            @unique
+  originType          String
+  eligibilityType     String
+  benefitType         String
+  cashbackRate        Decimal?
   fixedDiscountAmount Int?
-  amountThreshold    Int
-  validityStart      DateTime
-  validityEnd        DateTime
-  promotionNote      String?
-  sourceUrl          String
-  sourceTitle        String
-  createdAt          DateTime @default(now())
+  amountThreshold     Int
+  validityStart       DateTime
+  validityEnd         DateTime
+  promotionNote       String?
+  sourceUrl           String
+  sourceTitle         String
+  createdAt           DateTime       @default(now())
 
-  originMerchants    PromotionOriginMerchant[]
-  originOutlets      PromotionOriginOutlet[]
-  paymentMethods     PromotionPaymentMethod[]
-  eligibleBranches   PromotionEligibleBranch[]
-  excludedMerchants  PromotionExcludedMerchant[]
-  excludedBranches   PromotionExcludedBranch[]
+  originMerchants   PromotionOriginMerchant[]
+  originOutlets     PromotionOriginOutlet[]
+  paymentMethods    PromotionPaymentMethod[]
+  eligibleBranches  PromotionEligibleBranch[]
+  excludedMerchants PromotionExcludedMerchant[]
+  excludedBranches  PromotionExcludedBranch[]
+  issuers           PromotionIssuer[]
+  cards             PromotionCard[]
 }
 
 model PromotionOriginMerchant {
-  promotion  Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   promotionId Int
-  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  merchantId Int
+  merchant    Merchant  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  merchantId  Int
 
   @@id([promotionId, merchantId])
 }
@@ -289,7 +298,7 @@ model PromotionOriginOutlet {
 }
 
 model PromotionPaymentMethod {
-  promotion       Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotion       Promotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   promotionId     Int
   paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Restrict)
   paymentMethodId Int
@@ -298,7 +307,7 @@ model PromotionPaymentMethod {
 }
 
 model PromotionEligibleBranch {
-  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotion   Promotion      @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   promotionId Int
   branch      MerchantBranch @relation(fields: [branchId], references: [id], onDelete: Restrict)
   branchId    Int
@@ -307,19 +316,106 @@ model PromotionEligibleBranch {
 }
 
 model PromotionExcludedMerchant {
-  promotion  Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   promotionId Int
-  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  merchantId Int
+  merchant    Merchant  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  merchantId  Int
 
   @@id([promotionId, merchantId])
 }
 
 model PromotionExcludedBranch {
-  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotion   Promotion      @relation(fields: [promotionId], references: [id], onDelete: Cascade)
   promotionId Int
   branch      MerchantBranch @relation(fields: [branchId], references: [id], onDelete: Restrict)
   branchId    Int
 
   @@id([promotionId, branchId])
+}
+
+model Issuer {
+  id             Int    @id @default(autoincrement())
+  name           String @unique
+  normalizedName String @unique
+
+  cards                Card[]
+  merchantRestrictions MerchantIssuerRestriction[]
+  draftScopes          PromotionDraftIssuer[]
+  promotionScopes      PromotionIssuer[]
+}
+
+// kind is one of: credit, debit, prepaid
+model Card {
+  id   Int    @id @default(autoincrement())
+  name String
+  kind String
+
+  issuer    Issuer        @relation(fields: [issuerId], references: [id], onDelete: Restrict)
+  issuerId  Int
+  network   PaymentMethod @relation(fields: [networkId], references: [id], onDelete: Restrict)
+  networkId Int
+
+  merchantExclusions MerchantCardExclusion[]
+  draftScopes        PromotionDraftCard[]
+  promotionScopes    PromotionCard[]
+
+  @@unique([issuerId, name])
+}
+
+model MerchantIssuerRestriction {
+  merchant   Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  merchantId Int
+  network    PaymentMethod @relation(fields: [networkId], references: [id], onDelete: Restrict)
+  networkId  Int
+  issuer     Issuer        @relation(fields: [issuerId], references: [id], onDelete: Restrict)
+  issuerId   Int
+
+  acceptance MerchantPaymentAcceptance @relation(fields: [merchantId, networkId], references: [merchantId, paymentMethodId], onDelete: Restrict)
+
+  @@id([merchantId, networkId, issuerId])
+}
+
+model MerchantCardExclusion {
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  merchantId Int
+  card       Card     @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  cardId     Int
+
+  @@id([merchantId, cardId])
+}
+
+model PromotionDraftIssuer {
+  draft    PromotionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId  Int
+  issuer   Issuer         @relation(fields: [issuerId], references: [id], onDelete: Restrict)
+  issuerId Int
+
+  @@id([draftId, issuerId])
+}
+
+model PromotionDraftCard {
+  draft   PromotionDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId Int
+  card    Card           @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  cardId  Int
+
+  @@id([draftId, cardId])
+}
+
+model PromotionIssuer {
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotionId Int
+  issuer      Issuer    @relation(fields: [issuerId], references: [id], onDelete: Restrict)
+  issuerId    Int
+
+  @@id([promotionId, issuerId])
+}
+
+model PromotionCard {
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotionId Int
+  card        Card      @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  cardId      Int
+
+  @@id([promotionId, cardId])
 }

@@ -36,39 +36,52 @@ export async function addAcceptance(
 }
 
 export async function removeAcceptance(merchantId: number, paymentMethodId: number): Promise<boolean> {
-  const acceptance = await prisma.merchantPaymentAcceptance.findUnique({
-    where: { merchantId_paymentMethodId: { merchantId, paymentMethodId } },
-    select: { id: true }
-  });
-
-  if (!acceptance) {
-    return false;
-  }
-
-  const rewardRuleCount = await prisma.rewardRule.count({
-    where: { merchantId, paymentMethodId }
-  });
-
-  if (rewardRuleCount > 0) {
-    throw new RepositoryConflictError('acceptance has reward rules');
-  }
-
-  try {
-    await prisma.merchantPaymentAcceptance.delete({
-      where: { merchantId_paymentMethodId: { merchantId, paymentMethodId } }
+  return prisma.$transaction(async (transaction) => {
+    const acceptance = await transaction.merchantPaymentAcceptance.findUnique({
+      where: { merchantId_paymentMethodId: { merchantId, paymentMethodId } },
+      select: { id: true }
     });
-    return true;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2025') {
-        return false;
-      }
 
-      if (error.code === 'P2003') {
-        throw new RepositoryConflictError('acceptance has reward rules');
-      }
+    if (!acceptance) {
+      return false;
     }
 
-    throw error;
-  }
+    const [rewardRuleCount, issuerRestrictionCount] = await Promise.all([
+      transaction.rewardRule.count({
+        where: { merchantId, paymentMethodId }
+      }),
+      transaction.merchantIssuerRestriction.count({
+        where: { merchantId, networkId: paymentMethodId }
+      })
+    ]);
+
+    if (rewardRuleCount > 0) {
+      throw new RepositoryConflictError('acceptance has reward rules');
+    }
+    if (issuerRestrictionCount > 0) {
+      throw new RepositoryConflictError('acceptance has issuer restrictions');
+    }
+
+    try {
+      await transaction.merchantPaymentAcceptance.delete({
+        where: { merchantId_paymentMethodId: { merchantId, paymentMethodId } }
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') {
+          return false;
+        }
+        if (error.code === 'P2003') {
+          const rewardRules = await transaction.rewardRule.count({ where: { merchantId, paymentMethodId } });
+          if (rewardRules > 0) {
+            throw new RepositoryConflictError('acceptance has reward rules');
+          }
+          throw new RepositoryConflictError('acceptance has issuer restrictions');
+        }
+      }
+
+      throw error;
+    }
+  });
 }

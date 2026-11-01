@@ -19,6 +19,8 @@ export const promotionSelect = {
   sourceUrl: true,
   sourceTitle: true,
   paymentMethods: { select: { paymentMethodId: true } },
+  issuers: { select: { issuerId: true }, orderBy: { issuerId: 'asc' } },
+  cards: { select: { cardId: true }, orderBy: { cardId: 'asc' } },
   eligibleBranches: { select: { branchId: true } },
   excludedMerchants: { select: { merchantId: true } },
   excludedBranches: { select: { branchId: true } }
@@ -44,6 +46,8 @@ export function toPromotionRecord(row: PromotionRow): PromotionRecord {
     sourceUrl: row.sourceUrl,
     sourceTitle: row.sourceTitle,
     paymentMethodIds: row.paymentMethods.map(({ paymentMethodId }) => paymentMethodId),
+    issuerIds: row.issuers.map(({ issuerId }) => issuerId),
+    cardIds: row.cards.map(({ cardId }) => cardId),
     eligibleBranchIds: row.eligibleBranches.map(({ branchId }) => branchId),
     excludedMerchantIds: row.excludedMerchants.map(({ merchantId }) => merchantId),
     excludedBranchIds: row.excludedBranches.map(({ branchId }) => branchId)

@@ -201,9 +201,25 @@ describe('repository layer', () => {
       code: 'P2003',
       clientVersion: Prisma.prismaVersion.client
     });
-    jest.spyOn(prisma.merchantPaymentAcceptance, 'delete').mockRejectedValueOnce(foreignKeyError);
+    const deleteMock = jest.fn().mockRejectedValueOnce(foreignKeyError);
+    const transactionSpy = jest.spyOn(prisma, '$transaction').mockImplementation(async (callback) => {
+      return callback({
+        merchantPaymentAcceptance: {
+          findUnique: jest.fn().mockResolvedValue({ id: 1 }),
+          delete: deleteMock
+        },
+        rewardRule: {
+          count: jest.fn().mockResolvedValue(0)
+        },
+        merchantIssuerRestriction: {
+          count: jest.fn().mockResolvedValue(0)
+        }
+      } as never);
+    });
 
     await expect(removeAcceptance(merchant.id, method.id)).rejects.toBeInstanceOf(RepositoryConflictError);
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    transactionSpy.mockRestore();
   });
 
   test('rethrows unexpected delete errors', async () => {

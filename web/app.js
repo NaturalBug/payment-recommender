@@ -189,6 +189,9 @@ form.addEventListener('submit', async (event) => {
         const originNote = item.originType
           ? `<p>Promotion origin: ${escapeHtml(item.originName || '—')}</p>`
           : '';
+        const cardNote = item.cardId
+          ? `<p>Card details: ${escapeHtml(item.issuerName || '—')} · ${escapeHtml(item.networkName || '—')} · card #${escapeHtml(item.cardId)}</p>`
+          : '';
         const branchNote = item.branchName ? `<p>Merchant branch: ${escapeHtml(item.branchName)}</p>` : '';
         const outletNote = item.outletName ? `<p>Shopping Outlet/Mall: ${escapeHtml(item.outletName)}</p>` : '';
         const thresholdNote = Number(item.amountThreshold) > 0
@@ -198,6 +201,7 @@ form.addEventListener('submit', async (event) => {
         return `
           <article class="result-item">
             <h3>${escapeHtml(item.paymentMethod)}</h3>
+            ${cardNote}
             <p>${benefit}</p>
             <p>Estimated savings: NT$ ${Number(item.estimatedSavings).toFixed(2)}</p>
             ${thresholdNote}

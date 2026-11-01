@@ -137,6 +137,42 @@
         </section>
 
         <section class="management-section">
+          <h2>Issuers and cards</h2>
+          <form id="issuer-form" class="inline-form">
+            <label>
+              New issuer
+              <input id="issuer-name" name="name" type="text" required maxlength="120" />
+            </label>
+            <button type="submit">Add issuer</button>
+          </form>
+          <div id="issuers" class="table-wrapper"></div>
+          <form id="card-form" class="inline-form">
+            <label>
+              Card name
+              <input id="card-name" name="name" type="text" required maxlength="120" />
+            </label>
+            <label>
+              Kind
+              <select id="card-kind" name="kind" required>
+                <option value="credit">credit</option>
+                <option value="debit">debit</option>
+                <option value="prepaid">prepaid</option>
+              </select>
+            </label>
+            <label>
+              Issuer
+              <select id="card-issuer" name="issuerId" required></select>
+            </label>
+            <label>
+              Network
+              <select id="card-network" name="networkId" required></select>
+            </label>
+            <button type="submit">Add card</button>
+          </form>
+          <div id="cards" class="table-wrapper"></div>
+        </section>
+
+        <section class="management-section">
           <h2>Payment method types</h2>
           <form id="payment-method-type-form" class="inline-form">
             <label>
@@ -164,6 +200,12 @@
             <select id="acceptance-merchant" name="merchantId"></select>
           </label>
           <div id="accepted-payment-methods" class="checkbox-grid"></div>
+          <form id="card-rules-form" class="card-rules-form" hidden>
+            <h3>Card restrictions</h3>
+            <p id="card-rules-warning" class="muted" hidden></p>
+            <div id="card-rules-networks"></div>
+            <button type="submit">Save card restrictions</button>
+          </form>
         </section>
 
         <section class="rules-section">
@@ -239,6 +281,7 @@
       </fieldset>
     </main>
 
+    <script src="cardRulesState.js"></script>
     <script src="admin.js"></script>
   </body>
 </html>
