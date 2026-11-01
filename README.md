@@ -179,6 +179,80 @@ method catalog.
 Merchant, payment-method, and acceptance deletion returns `409 Conflict` while
 dependent acceptance mappings or reward rules exist.
 
+### Card catalog, merchant restrictions, and recommendations
+
+Card catalog and restriction endpoints use the same `X-Admin-API-Key` header
+as the other Admin API routes. Create an issuer, then create its card using the
+issuer ID and the ID of an existing `credit_card` payment method (the card's
+network). The `kind` is `credit`, `debit`, or `prepaid`.
+
+```http
+POST /api/admin/issuers
+X-Admin-API-Key: <admin-key>
+Content-Type: application/json
+
+{ "name": "Example Bank" }
+```
+
+```http
+POST /api/admin/cards
+X-Admin-API-Key: <admin-key>
+Content-Type: application/json
+
+{ "name": "Everyday Rewards", "kind": "credit", "issuerId": 1, "networkId": 2 }
+```
+
+Use `GET /api/admin/issuers`, `GET /api/admin/cards`, and the payment-method
+catalog to look up IDs. Before applying card-specific rules, make sure the
+merchant accepts the relevant credit-card network through
+`PUT /api/admin/merchants/:merchantId/payment-methods/:paymentMethodId`.
+Read the current settings with
+`GET /api/admin/merchants/:merchantId/card-rules`, then replace them with
+`PUT /api/admin/merchants/:merchantId/card-rules`:
+
+```json
+{
+  "issuerIdsByNetwork": { "2": [1, 3] },
+  "excludedCardIds": [12]
+}
+```
+
+`issuerIdsByNetwork` maps accepted network/payment-method IDs to allowed issuer
+IDs. For a network with an issuer allowlist, cards from other issuers are not
+recommended; omitted networks have no issuer restriction. `excludedCardIds`
+explicitly excludes those cards and takes precedence over an issuer allowlist.
+This PUT replaces the complete rule set. To clear all issuer restrictions and
+exclusions, send exactly:
+
+```json
+{ "issuerIdsByNetwork": {}, "excludedCardIds": [] }
+```
+
+The public recommendation endpoint remains
+`GET /api/recommendations?merchant_name=FamilyMart&amount=500&date=2026-11-01`.
+When an accepted credit-card network has catalog cards, eligible recommendations
+are expanded into named cards. Each `data` item includes `cardId`,
+`issuerName`, and `networkName`; its `paymentMethod` is displayed as
+`IssuerName CardName (NetworkName)`. Existing generic payment methods and
+network-only records continue to work: where no card catalog is configured for
+an accepted network, recommendations remain network-level. If restrictions
+remove every catalog card for a network, that network produces no
+recommendation.
+
+Promotion-draft reviewers may optionally set `issuerIds` and/or `cardIds` on
+`PATCH /api/admin/promotion-drafts/:id` to limit a published promotion to those
+issuers/cards. These fields are arrays of catalog IDs and may be combined:
+
+```json
+{ "issuerIds": [1], "cardIds": [12, 14] }
+```
+
+An empty array means no restriction for that scope; omit the fields to leave
+their current values unchanged. These scopes refine existing payment-method,
+merchant/outlet, and validity eligibility. This project provides the existing
+manual promotion-import and review flow only; it does not provide a crawler or
+scheduler.
+
 ## Continuous integration
 
 GitHub Actions runs on pushes to the main development branches and pull

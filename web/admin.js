@@ -30,6 +30,16 @@ const promotionDraftsContainer = document.getElementById('promotion-drafts');
 const adminApiKeyInput = document.getElementById('admin-api-key');
 const connectAdminButton = document.getElementById('connect-admin');
 const catalogControls = document.getElementById('catalog-controls');
+const issuerForm = document.getElementById('issuer-form');
+const issuersContainer = document.getElementById('issuers');
+const cardForm = document.getElementById('card-form');
+const cardIssuerSelect = document.getElementById('card-issuer');
+const cardNetworkSelect = document.getElementById('card-network');
+const cardsContainer = document.getElementById('cards');
+const cardRulesForm = document.getElementById('card-rules-form');
+const cardRulesNetworks = document.getElementById('card-rules-networks');
+const cardRulesWarning = document.getElementById('card-rules-warning');
+const cardRulesSubmitButton = cardRulesForm.querySelector('button[type="submit"]');
 const apiBaseUrl = `http://${window.location.hostname}:4000`;
 const today = new Date().toISOString().slice(0, 10);
 
@@ -42,6 +52,12 @@ let physicalOutlets = [];
 let merchantBranches = [];
 let importRuns = [];
 let promotionDrafts = [];
+let issuers = [];
+let cards = [];
+let acceptanceRequestGeneration = 0;
+let cardRulesMerchantId = null;
+let hiddenCardRuleState = { hiddenIssuerIdsByNetwork: {}, hiddenExcludedCardIds: [] };
+let loadedCardRulesBaseline = null;
 
 refreshCatalogButton.disabled = true;
 document.getElementById('validity-start').value = today;
@@ -174,6 +190,26 @@ async function fetchPromotionDrafts(status = promotionDraftStatusFilter.value) {
   const query = status ? `?status=${encodeURIComponent(status)}` : '';
   const json = await requestJson(`/api/admin/promotion-drafts${query}`);
   return json.data || [];
+}
+
+function cardLabel(card) {
+  const issuerName = issuers.find((issuer) => issuer.id === card.issuerId)?.name;
+  return issuerName ? issuerName + ' ' + card.name : card.name;
+}
+
+async function fetchIssuers() {
+  const json = await requestJson('/api/admin/issuers');
+  return json.data || [];
+}
+
+async function fetchCards() {
+  const json = await requestJson('/api/admin/cards');
+  return json.data || [];
+}
+
+async function fetchCardRules(merchantId) {
+  const json = await requestJson(`/api/admin/merchants/${encodeURIComponent(merchantId)}/card-rules`);
+  return json.data || { issuerIdsByNetwork: {}, excludedCardIds: [] };
 }
 
 async function fetchAcceptedPaymentMethods(merchantId) {
@@ -375,6 +411,12 @@ function renderPublishedPromotions() {
     const branch = merchantBranches.find((item) => item.id === id);
     return branch ? `${findMerchantName(branch.merchantId)} — ${branch.name}` : `#${id}`;
   }).join(', ');
+  const cardNames = (ids) => ids
+    .map((id) => {
+      const card = cards.find((item) => item.id === id);
+      return card ? cardLabel(card) : `#${id}`;
+    })
+    .join(', ');
   const scopeLabel = (promotion) => promotion.eligibilityType === 'selected_branches'
     ? names(promotion.eligibleBranchIds, merchantBranches) || '-'
     : 'All branches';
@@ -384,13 +426,17 @@ function renderPublishedPromotions() {
 
   publishedPromotionsContainer.innerHTML = `
     <table>
-      <thead><tr><th>Origin</th><th>Scope</th><th>Payment methods</th><th>Benefit</th><th>Excluded</th><th>Validity</th></tr></thead>
+      <thead><tr><th>Origin</th><th>Scope</th><th>Payment methods</th><th>Issuers / cards</th><th>Benefit</th><th>Excluded</th><th>Validity</th></tr></thead>
       <tbody>
         ${publishedPromotions.map((promotion) => `
           <tr>
             <td>${escapeHtml(origin(promotion))}</td>
             <td>${escapeHtml(scopeLabel(promotion))}</td>
             <td>${escapeHtml(names(promotion.paymentMethodIds, paymentMethods))}</td>
+            <td>${escapeHtml([
+              names(promotion.issuerIds || [], issuers),
+              cardNames(promotion.cardIds || [])
+            ].filter(Boolean).join('; ') || 'All cards')}</td>
             <td>${promotion.benefitType === 'fixed_discount'
               ? `NT$ ${escapeHtml(promotion.fixedDiscountAmount)} off`
               : `${(Number(promotion.cashbackRate) * 100).toFixed(2)}% cashback`}, min NT$ ${escapeHtml(promotion.amountThreshold)}</td>
@@ -556,6 +602,18 @@ function renderPromotionScopeOptions({ draft, disabled }) {
       Payment methods (select one or more)
       <select name="paymentMethodIds" multiple${disabledAttribute}>
         ${options(paymentMethods, selectedPaymentMethodIds, (method) => method.name)}
+      </select>
+    </label>
+    <label>
+      Issuers (optional; leave empty for all issuers)
+      <select name="issuerIds" multiple${disabledAttribute}>
+        ${options(issuers, new Set(draft.issuerIds || []), (issuer) => issuer.name)}
+      </select>
+    </label>
+    <label>
+      Cards (optional; leave empty for all cards)
+      <select name="cardIds" multiple${disabledAttribute}>
+        ${options(cards, new Set(draft.cardIds || []), cardLabel)}
       </select>
     </label>
     <label>
@@ -736,14 +794,34 @@ function updatePromotionScopeControls(form) {
 
 async function renderAcceptedPaymentMethods() {
   const merchantId = acceptanceMerchantSelect.value;
+  const generation = ++acceptanceRequestGeneration;
+  const isCurrent = () =>
+    generation === acceptanceRequestGeneration && merchantId === acceptanceMerchantSelect.value;
+  cardRulesMerchantId = null;
+  cardRulesForm.hidden = true;
+  cardRulesNetworks.innerHTML = '';
+  cardRulesWarning.hidden = true;
+  cardRulesWarning.textContent = '';
+  hiddenCardRuleState = { hiddenIssuerIdsByNetwork: {}, hiddenExcludedCardIds: [] };
+  loadedCardRulesBaseline = null;
+  cardRulesSubmitButton.disabled = false;
+  acceptedPaymentMethods.innerHTML = '';
 
   if (!merchantId) {
     acceptedPaymentMethods.innerHTML = '<p class="muted">Add a merchant first.</p>';
     return;
   }
 
-  const accepted = await fetchAcceptedPaymentMethods(merchantId);
+  let accepted;
+  try {
+    accepted = await fetchAcceptedPaymentMethods(merchantId);
+  } catch (error) {
+    if (!isCurrent()) return;
+    throw error;
+  }
+  if (!isCurrent()) return;
   const acceptedIds = new Set(accepted.map((method) => method.id));
+  const acceptedWithTypes = paymentMethods.filter((method) => acceptedIds.has(method.id));
 
   acceptedPaymentMethods.innerHTML = paymentMethods.length
     ? paymentMethods.map((method) => `
@@ -753,6 +831,136 @@ async function renderAcceptedPaymentMethods() {
       </label>
     `).join('')
     : '<p class="muted">Add a payment method first.</p>';
+
+  await renderCardRules(acceptedWithTypes, merchantId, isCurrent);
+}
+
+function renderIssuersAndCards() {
+  const creditNetworks = paymentMethods.filter((method) => method.type === 'credit_card');
+  const issuerName = (id) => issuers.find((issuer) => issuer.id === id)?.name || id;
+  const networkName = (id) => paymentMethods.find((method) => method.id === id)?.name || id;
+
+  cardIssuerSelect.innerHTML = issuers.length
+    ? issuers.map((issuer) => `<option value="${issuer.id}">${escapeHtml(issuer.name)}</option>`).join('')
+    : '<option value="">Add an issuer first</option>';
+  cardNetworkSelect.innerHTML = creditNetworks.length
+    ? creditNetworks.map((method) => `<option value="${method.id}">${escapeHtml(method.name)}</option>`).join('')
+    : '<option value="">Add a credit_card payment method first</option>';
+
+  issuersContainer.innerHTML = issuers.length
+    ? `<table><thead><tr><th>Issuer</th><th></th></tr></thead><tbody>${issuers.map((issuer) => `
+      <tr>
+        <td>${escapeHtml(issuer.name)}</td>
+        <td class="table-actions"><button type="button" class="danger-button delete-issuer" data-issuer-id="${issuer.id}">Delete</button></td>
+      </tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No issuers yet.</p>';
+  cardsContainer.innerHTML = cards.length
+    ? `<table><thead><tr><th>Card</th><th>Kind</th><th>Issuer</th><th>Network</th><th></th></tr></thead><tbody>${cards.map((card) => `
+      <tr>
+        <td>${escapeHtml(card.name)}</td>
+        <td>${escapeHtml(card.kind)}</td>
+        <td>${escapeHtml(issuerName(card.issuerId))}</td>
+        <td>${escapeHtml(networkName(card.networkId))}</td>
+        <td class="table-actions"><button type="button" class="danger-button delete-card" data-card-id="${card.id}">Delete</button></td>
+      </tr>`).join('')}</tbody></table>`
+    : '<p class="muted">No cards yet.</p>';
+}
+
+async function renderCardRules(acceptedMethods, merchantId, isCurrent) {
+  const creditNetworks = acceptedMethods.filter((method) => method.type === 'credit_card');
+
+  if (!merchantId || !creditNetworks.length) {
+    cardRulesForm.hidden = true;
+    cardRulesNetworks.innerHTML = '';
+    cardRulesWarning.hidden = true;
+    hiddenCardRuleState = { hiddenIssuerIdsByNetwork: {}, hiddenExcludedCardIds: [] };
+    return;
+  }
+
+  let rules;
+  try {
+    rules = await fetchCardRules(merchantId);
+  } catch (error) {
+    if (!isCurrent()) return;
+    throw error;
+  }
+  if (!isCurrent()) return;
+  loadedCardRulesBaseline = rules;
+  let currentIssuers;
+  let currentCards;
+  try {
+    [currentIssuers, currentCards] = await Promise.all([fetchIssuers(), fetchCards()]);
+  } catch (error) {
+    if (!isCurrent()) return;
+    throw error;
+  }
+  if (!isCurrent()) return;
+  const visibleNetworkIds = creditNetworks.map((network) => network.id);
+  const visibleIssuerIds = currentIssuers.map((issuer) => issuer.id);
+  const visibleCardIds = currentCards.map((card) => card.id);
+  hiddenCardRuleState = window.cardRulesState.deriveHiddenCardRuleState(rules, {
+    visibleNetworkIds,
+    visibleIssuerIds,
+    visibleCardIds
+  });
+  const hiddenIssuerCount = Object.values(hiddenCardRuleState.hiddenIssuerIdsByNetwork)
+    .reduce((sum, ids) => sum + ids.length, 0);
+  const hiddenCardCount = hiddenCardRuleState.hiddenExcludedCardIds.length;
+  if (hiddenIssuerCount > 0 || hiddenCardCount > 0) {
+    cardRulesWarning.hidden = false;
+    cardRulesWarning.textContent =
+      `Some existing rules reference ${hiddenIssuerCount} unavailable issuer entries and ` +
+      `${hiddenCardCount} unavailable cards. Saving will preserve them until the catalog is refreshed.`;
+  } else {
+    cardRulesWarning.hidden = true;
+    cardRulesWarning.textContent = '';
+  }
+  cardRulesSubmitButton.disabled = false;
+  const excluded = new Set(rules.excludedCardIds);
+  const networkSections = creditNetworks.map((network) => {
+    const allowed = new Set(rules.issuerIdsByNetwork[network.id] || []);
+    return `
+      <fieldset class="card-rules-network" data-network-id="${network.id}">
+        <legend>${escapeHtml(network.name)} issuer allowlist <span class="muted">(none checked = all issuers)</span></legend>
+        <div class="checkbox-grid">
+          ${currentIssuers.map((issuer) => `
+            <label class="checkbox-row">
+              <input type="checkbox" name="allowedIssuer" data-issuer-id="${issuer.id}" ${allowed.has(issuer.id) ? 'checked' : ''} />
+              ${escapeHtml(issuer.name)}
+            </label>`).join('') || '<p class="muted">No issuers yet.</p>'}
+        </div>
+      </fieldset>`;
+  }).join('');
+  const issuerName = (id) => currentIssuers.find((issuer) => issuer.id === id)?.name || id;
+  const exclusions = currentCards.length
+    ? currentCards.map((card) => `
+        <label class="checkbox-row">
+          <input type="checkbox" name="excludedCard" data-card-id="${card.id}" ${excluded.has(card.id) ? 'checked' : ''} />
+          ${escapeHtml(issuerName(card.issuerId))} — ${escapeHtml(card.name)}
+        </label>`).join('')
+    : '<p class="muted">No cards yet.</p>';
+
+  cardRulesNetworks.innerHTML = `${networkSections}
+    <fieldset class="card-rules-exclusions">
+      <legend>Excluded cards</legend>
+      <div class="checkbox-grid">${exclusions}</div>
+    </fieldset>`;
+  cardRulesMerchantId = merchantId;
+  cardRulesForm.hidden = false;
+}
+
+function collectCardRules() {
+  const issuerIdsByNetwork = {};
+  cardRulesNetworks.querySelectorAll('.card-rules-network').forEach((fieldset) => {
+    issuerIdsByNetwork[fieldset.dataset.networkId] = [...fieldset.querySelectorAll('input[name="allowedIssuer"]:checked')]
+      .map((input) => Number(input.dataset.issuerId));
+  });
+  const excludedCardIds = [...cardRulesNetworks.querySelectorAll('input[name="excludedCard"]:checked')]
+    .map((input) => Number(input.dataset.cardId));
+  return window.cardRulesState.mergeCardRulePayload(
+    { issuerIdsByNetwork, excludedCardIds },
+    hiddenCardRuleState
+  );
 }
 
 function setCatalogStatus(message, isError = false) {
@@ -761,7 +969,7 @@ function setCatalogStatus(message, isError = false) {
 }
 
 async function refreshCatalog() {
-  const [merchantData, paymentMethodData, paymentMethodTypeData, promotionData, rewardRuleData, importRunData, promotionDraftData, outletData] = await Promise.all([
+  const [merchantData, paymentMethodData, paymentMethodTypeData, promotionData, rewardRuleData, importRunData, promotionDraftData, outletData, issuerData, cardData] = await Promise.all([
     fetchMerchants(),
     fetchPaymentMethods(),
     fetchPaymentMethodTypes(),
@@ -769,13 +977,17 @@ async function refreshCatalog() {
     fetchRewardRules(),
     fetchImportRuns(),
     fetchPromotionDrafts(),
-    fetchOutlets()
+    fetchOutlets(),
+    fetchIssuers(),
+    fetchCards()
   ]);
   merchants = merchantData;
   paymentMethods = paymentMethodData;
   paymentMethodTypes = paymentMethodTypeData;
   publishedPromotions = promotionData;
   physicalOutlets = outletData;
+  issuers = issuerData;
+  cards = cardData;
   merchantBranches = (await Promise.all(merchants.map((merchant) => fetchMerchantBranches(merchant.id)))).flat();
   importRuns = importRunData;
   promotionDrafts = promotionDraftData;
@@ -784,6 +996,7 @@ async function refreshCatalog() {
   renderMerchants();
   renderPaymentMethodTypes();
   renderPaymentMethods();
+  renderIssuersAndCards();
   renderOutlets();
   renderBranches();
   renderRewardRules(rewardRuleData);
@@ -815,6 +1028,8 @@ function collectPromotionDraftReviewPayload(form) {
     excludedMerchantIds: selectedIds('excludedMerchantIds'),
     excludedBranchIds: selectedIds('excludedBranchIds'),
     paymentMethodIds,
+    issuerIds: selectedIds('issuerIds'),
+    cardIds: selectedIds('cardIds'),
     benefitType,
     cashbackRate: cashbackRateRaw ? Number(cashbackRateRaw) : null,
     fixedDiscountAmount: fixedDiscountAmountRaw ? Number(fixedDiscountAmountRaw) : null,
@@ -1105,6 +1320,87 @@ paymentMethodsContainer.addEventListener('click', async (event) => {
       return;
     }
     await refreshCatalog();
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+issuerForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const name = document.getElementById('issuer-name').value.trim();
+  try {
+    await requestJson('/api/admin/issuers', { method: 'POST', body: JSON.stringify({ name }) });
+    issuerForm.reset();
+    await refreshCatalog();
+    setCatalogStatus(`Added issuer "${name}".`);
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+issuersContainer.addEventListener('click', async (event) => {
+  const button = event.target.closest('.delete-issuer');
+  if (!button) {
+    return;
+  }
+  try {
+    await requestJson(`/api/admin/issuers/${encodeURIComponent(button.dataset.issuerId)}`, { method: 'DELETE' });
+    await refreshCatalog();
+    setCatalogStatus('Deleted issuer.');
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+cardForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = new FormData(cardForm);
+  const payload = {
+    name: String(form.get('name')).trim(),
+    kind: form.get('kind'),
+    issuerId: Number(form.get('issuerId')),
+    networkId: Number(form.get('networkId'))
+  };
+  try {
+    await requestJson('/api/admin/cards', { method: 'POST', body: JSON.stringify(payload) });
+    cardForm.reset();
+    await refreshCatalog();
+    setCatalogStatus(`Added card "${payload.name}".`);
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+cardsContainer.addEventListener('click', async (event) => {
+  const button = event.target.closest('.delete-card');
+  if (!button) {
+    return;
+  }
+  try {
+    await requestJson(`/api/admin/cards/${encodeURIComponent(button.dataset.cardId)}`, { method: 'DELETE' });
+    await refreshCatalog();
+    setCatalogStatus('Deleted card.');
+  } catch (error) {
+    setCatalogStatus(error.message, true);
+  }
+});
+
+cardRulesForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const merchantId = acceptanceMerchantSelect.value;
+  if (!merchantId || cardRulesMerchantId !== merchantId || cardRulesForm.hidden) {
+    return;
+  }
+  try {
+    await requestJson(`/api/admin/merchants/${encodeURIComponent(merchantId)}/card-rules`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...collectCardRules(),
+        expectedCurrentRules: loadedCardRulesBaseline
+      })
+    });
+    await renderAcceptedPaymentMethods();
+    setCatalogStatus('Saved card restrictions.');
   } catch (error) {
     setCatalogStatus(error.message, true);
   }
